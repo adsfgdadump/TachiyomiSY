@@ -166,7 +166,7 @@ class SettingsLibraryController : SettingsController() {
                     R.string.update_72hour,
                     R.string.update_weekly,
                 )
-                entryValues = arrayOf("0", "12", "24", "48", "72", "168")
+                entryValues = arrayOf("0", "12", "24", "48", "6", "3")
                 summary = "%s"
 
                 onChange { newValue ->
