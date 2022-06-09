@@ -26,7 +26,7 @@ android {
         applicationId = "eu.kanade.tachiyomi.sy"
         minSdk = AndroidConfig.minSdk
         targetSdk = AndroidConfig.targetSdk
-        versionCode = 34
+        versionCode = 35
         versionName = "1.8.3"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
@@ -119,6 +119,13 @@ android {
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_1_8.toString()
     }
+
+    sqldelight {
+        database("Database") {
+            packageName = "eu.kanade.tachiyomi"
+            dialect = "sqlite:3.24"
+        }
+    }
 }
 
 dependencies {
@@ -130,12 +137,14 @@ dependencies {
     implementation(compose.material.icons)
     implementation(compose.animation)
     implementation(compose.ui.tooling)
+    implementation(compose.ui.util)
     implementation(compose.accompanist.webview)
+    implementation(compose.accompanist.swiperefresh)
 
     implementation(androidx.paging.runtime)
     implementation(androidx.paging.compose)
 
-    implementation(libs.sqldelight.sqlite)
+    implementation(androidx.sqlite)
     implementation(libs.sqldelight.android.driver)
     implementation(libs.sqldelight.coroutines)
     implementation(libs.sqldelight.android.paging)

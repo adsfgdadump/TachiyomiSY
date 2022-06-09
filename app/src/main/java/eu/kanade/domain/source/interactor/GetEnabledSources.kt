@@ -6,6 +6,7 @@ import eu.kanade.domain.source.model.Source
 import eu.kanade.domain.source.repository.SourceRepository
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
 import eu.kanade.tachiyomi.source.LocalSource
+import exh.source.BlacklistedSources
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -39,8 +40,8 @@ class GetEnabledSources(
             val sourcesInSourceCategories = sourcesAndCategories.map { it.first }
             sources
                 .filter { it.lang in enabledLanguages || it.id == LocalSource.ID }
-                .filterNot { it.id.toString() in disabledSources }
-                .sortedBy { it.name }
+                .filterNot { it.id.toString() in disabledSources || it.id in BlacklistedSources.HIDDEN_SOURCES }
+                .sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.name })
                 .flatMap {
                     val flag = if ("${it.id}" in pinnedSourceIds) Pins.pinned else Pins.unpinned
                     // SY -->
@@ -51,7 +52,7 @@ class GetEnabledSources(
                     val source = it.copy(
                         pin = flag,
                         isExcludedFromDataSaver = it.id.toString() in excludedFromDataSaver,
-                        categories = categories
+                        categories = categories,
                     )
                     val toFlatten = mutableListOf(source)
                     if (source.id == lastUsedSource) {

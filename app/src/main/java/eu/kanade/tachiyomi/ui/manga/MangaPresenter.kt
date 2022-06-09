@@ -38,6 +38,7 @@ import eu.kanade.tachiyomi.util.chapter.syncChaptersWithSource
 import eu.kanade.tachiyomi.util.chapter.syncChaptersWithTrackServiceTwoWay
 import eu.kanade.tachiyomi.util.isLocal
 import eu.kanade.tachiyomi.util.lang.launchIO
+import eu.kanade.tachiyomi.util.lang.launchUI
 import eu.kanade.tachiyomi.util.lang.withUIContext
 import eu.kanade.tachiyomi.util.prepUpdateCover
 import eu.kanade.tachiyomi.util.removeCovers
@@ -66,6 +67,7 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.supervisorScope
@@ -146,7 +148,7 @@ class MangaPresenter(
 
     data class EXHRedirect(val manga: Manga, val update: Boolean)
 
-    var meta: RaisedSearchMetadata? = null
+    val meta: MutableStateFlow<RaisedSearchMetadata?> = MutableStateFlow(null)
 
     var mergedManga = emptyMap<Long, Manga>()
         private set
@@ -191,7 +193,7 @@ class MangaPresenter(
                 val meta = if (mainSource != null) {
                     flatMetadata?.raise(mainSource.metaClass)
                 } else null
-                this.meta = meta
+                this.meta.value = meta
                 // SY <--
                 view.onNextMangaInfo(manga, source, meta)
             },)
@@ -284,7 +286,7 @@ class MangaPresenter(
             return Observable.just(0)
         }
 
-        return db.getTracks(manga).asRxObservable()
+        return db.getTracks(manga.id).asRxObservable()
             .map { tracks ->
                 val loggedServices = trackManager.services.filter { it.isLogged }.map { it.id }
                 tracks
@@ -374,29 +376,19 @@ class MangaPresenter(
         if (uri != null) {
             editCover(manga, context, uri)
         } else if (resetCover) {
-            coverCache.deleteCustomCover(manga)
+            coverCache.deleteCustomCover(manga.id)
             manga.updateCoverLastModified(db)
         }
 
         if (uri == null && resetCover) {
-            Observable.just(manga)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribeLatestCache(
-                    { view, _ ->
-                        view.setRefreshing()
-                    },
-                )
+            launchUI {
+                view?.setRefreshing()
+            }
             fetchMangaFromSource(manualFetch = true)
         } else {
-            Observable.just(manga)
-                .subscribeOn(Schedulers.io())
-                .observeOn(AndroidSchedulers.mainThread())
-                .subscribeLatestCache(
-                    { view, _ ->
-                        view.onNextMangaInfo(manga, source, meta)
-                    },
-                )
+            launchUI {
+                view?.onNextMangaInfo(manga, source, meta.value)
+            }
         }
     }
 
@@ -667,7 +659,7 @@ class MangaPresenter(
     fun deleteCustomCover(manga: Manga) {
         Observable
             .fromCallable {
-                coverCache.deleteCustomCover(manga)
+                coverCache.deleteCustomCover(manga.id)
                 manga.updateCoverLastModified(db)
                 coverCache.clearMemoryCache()
             }
@@ -888,7 +880,7 @@ class MangaPresenter(
     }
 
     fun startDownloadingNow(chapter: Chapter) {
-        downloadManager.startDownloadNow(chapter)
+        downloadManager.startDownloadNow(chapter.id)
     }
 
     /**
@@ -1109,7 +1101,7 @@ class MangaPresenter(
 
     private fun fetchTrackers() {
         trackSubscription?.let { remove(it) }
-        trackSubscription = db.getTracks(manga)
+        trackSubscription = db.getTracks(manga.id)
             .asRxObservable()
             .map { tracks ->
                 loggedServices.map { service ->

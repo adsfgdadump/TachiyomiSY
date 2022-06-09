@@ -332,15 +332,18 @@ class LibraryPresenter(
     private fun applySort(categories: List<Category>, map: LibraryMap): LibraryMap {
         val lastReadManga by lazy {
             var counter = 0
-            db.getLastReadManga().executeAsBlocking().associate { it.id!! to counter++ }
+            // Result comes as newest to oldest so it's reversed
+            db.getLastReadManga().executeAsBlocking().reversed().associate { it.id!! to counter++ }
         }
         val latestChapterManga by lazy {
             var counter = 0
-            db.getLatestChapterManga().executeAsBlocking().associate { it.id!! to counter++ }
+            // Result comes as newest to oldest so it's reversed
+            db.getLatestChapterManga().executeAsBlocking().reversed().associate { it.id!! to counter++ }
         }
         val chapterFetchDateManga by lazy {
             var counter = 0
-            db.getChapterFetchDateManga().executeAsBlocking().associate { it.id!! to counter++ }
+            // Result comes as newest to oldest so it's reversed
+            db.getChapterFetchDateManga().executeAsBlocking().reversed().associate { it.id!! to counter++ }
         }
 
         // SY -->
@@ -392,10 +395,10 @@ class LibraryPresenter(
                     val manga2LastRead = lastReadManga[i2.manga.id!!] ?: 0
                     manga1LastRead.compareTo(manga2LastRead)
                 }
-                SortModeSetting.LAST_CHECKED -> {
+                SortModeSetting.LAST_MANGA_UPDATE -> {
                     i1.manga.last_update.compareTo(i2.manga.last_update)
                 }
-                SortModeSetting.UNREAD -> when {
+                SortModeSetting.UNREAD_COUNT -> when {
                     // Ensure unread content comes first
                     i1.manga.unreadCount == i2.manga.unreadCount -> 0
                     i1.manga.unreadCount == 0 -> if (sortAscending) 1 else -1
@@ -412,7 +415,7 @@ class LibraryPresenter(
                         ?: latestChapterManga.size
                     manga1latestChapter.compareTo(manga2latestChapter)
                 }
-                SortModeSetting.DATE_FETCHED -> {
+                SortModeSetting.CHAPTER_FETCH_DATE -> {
                     val manga1chapterFetchDate = chapterFetchDateManga[i1.manga.id!!] ?: 0
                     val manga2chapterFetchDate = chapterFetchDateManga[i2.manga.id!!] ?: 0
                     manga1chapterFetchDate.compareTo(manga2chapterFetchDate)
@@ -430,6 +433,7 @@ class LibraryPresenter(
                     manga1IndexOfTag.compareTo(manga2IndexOfTag)
                 }
                 // SY <--
+                else -> throw IllegalStateException("Invalid SortModeSetting: $sortingMode")
             }
         }
 
@@ -830,7 +834,7 @@ class LibraryPresenter(
                         SManga.ONGOING to context.getString(R.string.ongoing),
                         SManga.LICENSED to context.getString(R.string.licensed),
                         SManga.CANCELLED to context.getString(R.string.cancelled),
-                        SManga.ON_HIATUS to context.getString(R.string.ongoing),
+                        SManga.ON_HIATUS to context.getString(R.string.on_hiatus),
                         SManga.PUBLISHING_FINISHED to context.getString(R.string.publishing_finished),
                         SManga.COMPLETED to context.getString(R.string.completed),
                         SManga.UNKNOWN to context.getString(R.string.unknown),

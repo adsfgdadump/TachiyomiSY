@@ -71,9 +71,6 @@ import xyz.nulldev.ts.api.http.serializer.FilterSerializer
 import java.lang.RuntimeException
 import java.util.Date
 
-/**
- * Presenter of [BrowseSourceController].
- */
 open class BrowseSourcePresenter(
     private val sourceId: Long,
     searchQuery: String? = null,
@@ -439,6 +436,10 @@ open class BrowseSourcePresenter(
      */
     fun getCategories(): List<Category> {
         return db.getCategories().executeAsBlocking()
+    }
+
+    fun getDuplicateLibraryManga(manga: Manga): Manga? {
+        return db.getDuplicateLibraryManga(manga).executeAsBlocking()
     }
 
     /**

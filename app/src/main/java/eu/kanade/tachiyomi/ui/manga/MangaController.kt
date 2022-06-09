@@ -35,6 +35,7 @@ import com.google.android.material.snackbar.Snackbar
 import dev.chrisbanes.insetter.applyInsetter
 import eu.davidea.flexibleadapter.FlexibleAdapter
 import eu.davidea.flexibleadapter.SelectableAdapter
+import eu.kanade.data.chapter.NoChaptersException
 import eu.kanade.domain.history.model.HistoryWithRelations
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.cache.CoverCache
@@ -65,8 +66,8 @@ import eu.kanade.tachiyomi.ui.base.controller.popControllerWithTag
 import eu.kanade.tachiyomi.ui.base.controller.pushController
 import eu.kanade.tachiyomi.ui.base.controller.withFadeTransaction
 import eu.kanade.tachiyomi.ui.browse.migration.advanced.design.PreMigrationController
-import eu.kanade.tachiyomi.ui.browse.source.SourceController
-import eu.kanade.tachiyomi.ui.browse.source.SourceController.Companion.SMART_SEARCH_SOURCE_TAG
+import eu.kanade.tachiyomi.ui.browse.source.SourcesController
+import eu.kanade.tachiyomi.ui.browse.source.SourcesController.Companion.SMART_SEARCH_SOURCE_TAG
 import eu.kanade.tachiyomi.ui.browse.source.browse.BrowseSourceController
 import eu.kanade.tachiyomi.ui.browse.source.feed.SourceFeedController
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchController
@@ -93,7 +94,6 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.recent.history.HistoryController
 import eu.kanade.tachiyomi.ui.recent.updates.UpdatesController
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
-import eu.kanade.tachiyomi.util.chapter.NoChaptersException
 import eu.kanade.tachiyomi.util.hasCustomCover
 import eu.kanade.tachiyomi.util.lang.launchIO
 import eu.kanade.tachiyomi.util.lang.launchUI
@@ -140,7 +140,7 @@ class MangaController :
 
     constructor(history: HistoryWithRelations) : this(history.mangaId)
 
-    constructor(manga: Manga?, fromSource: Boolean = false, smartSearchConfig: SourceController.SmartSearchConfig? = null, update: Boolean = false) : super(
+    constructor(manga: Manga?, fromSource: Boolean = false, smartSearchConfig: SourcesController.SmartSearchConfig? = null, update: Boolean = false) : super(
         bundleOf(
             MANGA_EXTRA to (manga?.id ?: 0),
             FROM_SOURCE_EXTRA to fromSource,
@@ -187,7 +187,6 @@ class MangaController :
 
     private val preferences: PreferencesHelper by injectLazy()
     private val coverCache: CoverCache by injectLazy()
-    private val sourceManager: SourceManager by injectLazy()
 
     private var mangaInfoAdapter: MangaInfoHeaderAdapter? = null
 
@@ -239,7 +238,7 @@ class MangaController :
     }
 
     // EXH -->
-    val smartSearchConfig: SourceController.SmartSearchConfig? = args.getParcelable(
+    val smartSearchConfig: SourcesController.SmartSearchConfig? = args.getParcelable(
         SMART_SEARCH_CONFIG_EXTRA,
     )
 
@@ -653,30 +652,11 @@ class MangaController :
         } else {
             val duplicateManga = presenter.getDuplicateLibraryManga(manga)
             if (duplicateManga != null) {
-                showAddDuplicateDialog(
-                    manga,
-                    duplicateManga,
-                )
+                AddDuplicateMangaDialog(this, duplicateManga) { addToLibrary(manga) }
+                    .showDialog(router)
             } else {
                 addToLibrary(manga)
             }
-        }
-    }
-
-    private fun showAddDuplicateDialog(newManga: Manga, libraryManga: Manga) {
-        activity?.let {
-            val source = sourceManager.getOrStub(libraryManga.source)
-            MaterialAlertDialogBuilder(it).apply {
-                setMessage(activity?.getString(R.string.confirm_manga_add_duplicate, source.name))
-                setPositiveButton(activity?.getString(R.string.action_add)) { _, _ ->
-                    addToLibrary(newManga)
-                }
-                setNegativeButton(activity?.getString(R.string.action_cancel)) { _, _ -> }
-                setNeutralButton(activity?.getString(R.string.action_show_manga)) { _, _ ->
-                    router.pushController(MangaController(libraryManga))
-                }
-                setCancelable(true)
-            }.create().show()
         }
     }
 
@@ -684,7 +664,7 @@ class MangaController :
         trackSheet?.show()
     }
 
-    private fun addToLibrary(manga: Manga) {
+    private fun addToLibrary(newManga: Manga) {
         val categories = presenter.getCategories()
         val defaultCategoryId = preferences.defaultCategory()
         val defaultCategory = categories.find { it.id == defaultCategoryId }
@@ -693,7 +673,7 @@ class MangaController :
             // Default category set
             defaultCategory != null -> {
                 toggleFavorite()
-                presenter.moveMangaToCategory(manga, defaultCategory)
+                presenter.moveMangaToCategory(newManga, defaultCategory)
                 activity?.toast(activity?.getString(R.string.manga_added_library))
                 activity?.invalidateOptionsMenu()
             }
@@ -701,14 +681,14 @@ class MangaController :
             // Automatic 'Default' or no categories
             defaultCategoryId == 0 || categories.isEmpty() -> {
                 toggleFavorite()
-                presenter.moveMangaToCategory(manga, null)
+                presenter.moveMangaToCategory(newManga, null)
                 activity?.toast(activity?.getString(R.string.manga_added_library))
                 activity?.invalidateOptionsMenu()
             }
 
             // Choose a category
             else -> {
-                val ids = presenter.getMangaCategoryIds(manga)
+                val ids = presenter.getMangaCategoryIds(newManga)
                 val preselected = categories.map {
                     if (it.id in ids) {
                         QuadStateTextView.State.CHECKED.ordinal
@@ -717,7 +697,7 @@ class MangaController :
                     }
                 }.toTypedArray()
 
-                showChangeCategoryDialog(manga, categories, preselected)
+                showChangeCategoryDialog(newManga, categories, preselected)
             }
         }
 
@@ -729,12 +709,12 @@ class MangaController :
                 .forEach { service ->
                     launchIO {
                         try {
-                            service.match(manga)?.let { track ->
+                            service.match(newManga)?.let { track ->
                                 presenter.registerTracking(track, service as TrackService)
                             }
                         } catch (e: Exception) {
                             logcat(LogPriority.WARN, e) {
-                                "Could not match manga: ${manga.title} with service $service"
+                                "Could not match manga: ${newManga.title} with service $service"
                             }
                         }
                     }
@@ -751,12 +731,12 @@ class MangaController :
 
     // EXH -->
     fun openSmartSearch() {
-        val smartSearchConfig = SourceController.SmartSearchConfig(presenter.manga.title, presenter.manga.id)
+        val smartSearchConfig = SourcesController.SmartSearchConfig(presenter.manga.title, presenter.manga.id)
 
         router?.pushController(
-            SourceController(
+            SourcesController(
                 bundleOf(
-                    SourceController.SMART_SEARCH_CONFIG to smartSearchConfig,
+                    SourcesController.SMART_SEARCH_CONFIG to smartSearchConfig,
                 ),
             ).withFadeTransaction().tag(SMART_SEARCH_SOURCE_TAG),
         )

@@ -17,9 +17,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.dp
 import eu.kanade.core.prefs.PreferenceMutableState
 import eu.kanade.presentation.util.horizontalPadding
+
+const val DIVIDER_ALPHA = 0.2f
 
 @Composable
 fun Divider(
@@ -27,7 +30,7 @@ fun Divider(
 ) {
     androidx.compose.material3.Divider(
         modifier = modifier,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.2f),
+        color = MaterialTheme.colorScheme.onSurface.copy(alpha = DIVIDER_ALPHA),
     )
 }
 
@@ -40,8 +43,11 @@ fun PreferenceRow(
     onLongClick: () -> Unit = {},
     subtitle: String? = null,
     action: @Composable (() -> Unit)? = null,
+    // SY -->
+    subtitleAnnotated: AnnotatedString? = null,
+    // SY <--
 ) {
-    val height = if (subtitle != null) 72.dp else 56.dp
+    val height = if (subtitle != null /* SY --> */ || subtitleAnnotated != null/* SY <-- */) 72.dp else 56.dp
 
     val titleTextStyle = MaterialTheme.typography.bodyLarge
     val subtitleTextStyle = MaterialTheme.typography.bodyMedium.copy(
@@ -56,13 +62,13 @@ fun PreferenceRow(
                 onLongClick = onLongClick,
                 onClick = onClick,
             ),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         if (painter != null) {
             Icon(
                 painter = painter,
                 modifier = Modifier
-                    .padding(horizontal = horizontalPadding)
+                    .padding(start = horizontalPadding, end = 16.dp)
                     .size(24.dp),
                 tint = MaterialTheme.colorScheme.primary,
                 contentDescription = null,
@@ -70,8 +76,8 @@ fun PreferenceRow(
         }
         Column(
             Modifier
-                .padding(horizontal = horizontalPadding)
-                .weight(1f)
+                .padding(horizontal = 16.dp)
+                .weight(1f),
         ) {
             Text(
                 text = title,
@@ -84,9 +90,22 @@ fun PreferenceRow(
                     style = subtitleTextStyle,
                 )
             }
+            // SY -->
+            if (subtitleAnnotated != null) {
+                Text(
+                    modifier = Modifier.padding(top = 4.dp),
+                    text = subtitleAnnotated,
+                    style = subtitleTextStyle,
+                )
+            }
+            // SY <--
         }
         if (action != null) {
-            Box(Modifier.widthIn(min = 56.dp)) {
+            Box(
+                Modifier
+                    .widthIn(min = 56.dp)
+                    .padding(end = horizontalPadding),
+            ) {
                 action()
             }
         }
@@ -100,17 +119,19 @@ fun SwitchPreference(
     title: String,
     subtitle: String? = null,
     painter: Painter? = null,
+    // SY -->
+    subtitleAnnotated: AnnotatedString? = null,
+    // SY <--
 ) {
     PreferenceRow(
         modifier = modifier,
         title = title,
         subtitle = subtitle,
         painter = painter,
-        action = {
-            Switch(checked = preference.value, onCheckedChange = null)
-            // TODO: remove this once switch checked state is fixed: https://issuetracker.google.com/issues/228336571
-            Text(preference.value.toString())
-        },
+        action = { Switch(checked = preference.value, onCheckedChange = null) },
         onClick = { preference.value = !preference.value },
+        // SY -->
+        subtitleAnnotated = subtitleAnnotated,
+        // SY <--
     )
 }

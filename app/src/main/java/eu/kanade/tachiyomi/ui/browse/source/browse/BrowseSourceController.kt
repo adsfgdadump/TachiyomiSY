@@ -37,11 +37,12 @@ import eu.kanade.tachiyomi.ui.base.controller.FabController
 import eu.kanade.tachiyomi.ui.base.controller.SearchableNucleusController
 import eu.kanade.tachiyomi.ui.base.controller.pushController
 import eu.kanade.tachiyomi.ui.browse.extension.details.SourcePreferencesController
-import eu.kanade.tachiyomi.ui.browse.source.SourceController
+import eu.kanade.tachiyomi.ui.browse.source.SourcesController
 import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchController
 import eu.kanade.tachiyomi.ui.library.ChangeMangaCategoriesDialog
 import eu.kanade.tachiyomi.ui.library.setting.DisplayModeSetting
 import eu.kanade.tachiyomi.ui.main.MainActivity
+import eu.kanade.tachiyomi.ui.manga.AddDuplicateMangaDialog
 import eu.kanade.tachiyomi.ui.manga.MangaController
 import eu.kanade.tachiyomi.ui.more.MoreController
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
@@ -69,9 +70,6 @@ import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import uy.kohesive.injekt.injectLazy
 
-/**
- * Controller to manage the catalogues available in the app.
- */
 open class BrowseSourceController(bundle: Bundle) :
     SearchableNucleusController<SourceControllerBinding, BrowseSourcePresenter>(bundle),
     FabController,
@@ -84,7 +82,7 @@ open class BrowseSourceController(bundle: Bundle) :
         sourceId: Long,
         query: String? = null,
         // SY -->
-        smartSearchConfig: SourceController.SmartSearchConfig? = null,
+        smartSearchConfig: SourcesController.SmartSearchConfig? = null,
         savedSearch: Long? = null,
         filterList: String? = null,
         // SY <--
@@ -115,7 +113,7 @@ open class BrowseSourceController(bundle: Bundle) :
         source: CatalogueSource,
         query: String? = null,
         // SY -->
-        smartSearchConfig: SourceController.SmartSearchConfig? = null,
+        smartSearchConfig: SourcesController.SmartSearchConfig? = null,
         savedSearch: Long? = null,
         filterList: String? = null,
         // SY <--
@@ -124,14 +122,14 @@ open class BrowseSourceController(bundle: Bundle) :
         query,
         smartSearchConfig,
         savedSearch,
-        filterList
+        filterList,
     )
 
     constructor(
         source: Source,
         query: String? = null,
         // SY -->
-        smartSearchConfig: SourceController.SmartSearchConfig? = null,
+        smartSearchConfig: SourcesController.SmartSearchConfig? = null,
         savedSearch: Long? = null,
         filterList: String? = null,
         // SY <--
@@ -140,7 +138,7 @@ open class BrowseSourceController(bundle: Bundle) :
         query,
         smartSearchConfig,
         savedSearch,
-        filterList
+        filterList,
     )
 
     private val preferences: PreferencesHelper by injectLazy()
@@ -532,6 +530,7 @@ open class BrowseSourceController(bundle: Bundle) :
                         when (filter) {
                             is Filter.TriState -> filter.state = 1
                             is Filter.CheckBox -> filter.state = true
+                            else -> {}
                         }
                         filterList = presenter.sourceFilters
                         break@filter
@@ -778,6 +777,7 @@ open class BrowseSourceController(bundle: Bundle) :
     override fun onItemLongClick(position: Int) {
         val activity = activity ?: return
         val manga = (adapter?.getItem(position) as? SourceItem?)?.manga ?: return
+        val duplicateManga = presenter.getDuplicateLibraryManga(manga)
 
         if (manga.favorite) {
             MaterialAlertDialogBuilder(activity)
@@ -793,43 +793,53 @@ open class BrowseSourceController(bundle: Bundle) :
                 }
                 .show()
         } else {
-            val categories = presenter.getCategories()
-            val defaultCategoryId = preferences.defaultCategory()
-            val defaultCategory = categories.find { it.id == defaultCategoryId }
+            if (duplicateManga != null) {
+                AddDuplicateMangaDialog(this, duplicateManga) { addToLibrary(manga, position) }
+                    .showDialog(router)
+            } else {
+                addToLibrary(manga, position)
+            }
+        }
+    }
 
-            when {
-                // Default category set
-                defaultCategory != null -> {
-                    presenter.moveMangaToCategory(manga, defaultCategory)
+    private fun addToLibrary(newManga: Manga, position: Int) {
+        val activity = activity ?: return
+        val categories = presenter.getCategories()
+        val defaultCategoryId = preferences.defaultCategory()
+        val defaultCategory = categories.find { it.id == defaultCategoryId }
 
-                    presenter.changeMangaFavorite(manga)
-                    adapter?.notifyItemChanged(position)
-                    activity.toast(activity.getString(R.string.manga_added_library))
-                }
+        when {
+            // Default category set
+            defaultCategory != null -> {
+                presenter.moveMangaToCategory(newManga, defaultCategory)
 
-                // Automatic 'Default' or no categories
-                defaultCategoryId == 0 || categories.isEmpty() -> {
-                    presenter.moveMangaToCategory(manga, null)
+                presenter.changeMangaFavorite(newManga)
+                adapter?.notifyItemChanged(position)
+                activity.toast(activity.getString(R.string.manga_added_library))
+            }
 
-                    presenter.changeMangaFavorite(manga)
-                    adapter?.notifyItemChanged(position)
-                    activity.toast(activity.getString(R.string.manga_added_library))
-                }
+            // Automatic 'Default' or no categories
+            defaultCategoryId == 0 || categories.isEmpty() -> {
+                presenter.moveMangaToCategory(newManga, null)
 
-                // Choose a category
-                else -> {
-                    val ids = presenter.getMangaCategoryIds(manga)
-                    val preselected = categories.map {
-                        if (it.id in ids) {
-                            QuadStateTextView.State.CHECKED.ordinal
-                        } else {
-                            QuadStateTextView.State.UNCHECKED.ordinal
-                        }
-                    }.toTypedArray()
+                presenter.changeMangaFavorite(newManga)
+                adapter?.notifyItemChanged(position)
+                activity.toast(activity.getString(R.string.manga_added_library))
+            }
 
-                    ChangeMangaCategoriesDialog(this, listOf(manga), categories, preselected)
-                        .showDialog(router)
-                }
+            // Choose a category
+            else -> {
+                val ids = presenter.getMangaCategoryIds(newManga)
+                val preselected = categories.map {
+                    if (it.id in ids) {
+                        QuadStateTextView.State.CHECKED.ordinal
+                    } else {
+                        QuadStateTextView.State.UNCHECKED.ordinal
+                    }
+                }.toTypedArray()
+
+                ChangeMangaCategoriesDialog(this, listOf(newManga), categories, preselected)
+                    .showDialog(router)
             }
         }
     }

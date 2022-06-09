@@ -1,3 +1,5 @@
+@file:Suppress("DEPRECATION")
+
 package exh
 
 import android.content.Context
@@ -310,15 +312,14 @@ object EXHMigrations {
                     val oldSortingMode = prefs.getInt(PreferenceKeys.librarySortingMode, 0)
                     val oldSortingDirection = prefs.getBoolean(PreferenceKeys.librarySortingDirection, true)
 
-                    @Suppress("DEPRECATION")
                     val newSortingMode = when (oldSortingMode) {
                         LibrarySort.ALPHA -> SortModeSetting.ALPHABETICAL
                         LibrarySort.LAST_READ -> SortModeSetting.LAST_READ
-                        LibrarySort.LAST_CHECKED -> SortModeSetting.LAST_CHECKED
-                        LibrarySort.UNREAD -> SortModeSetting.UNREAD
+                        LibrarySort.LAST_CHECKED -> SortModeSetting.LAST_MANGA_UPDATE
+                        LibrarySort.UNREAD -> SortModeSetting.UNREAD_COUNT
                         LibrarySort.TOTAL -> SortModeSetting.TOTAL_CHAPTERS
                         LibrarySort.LATEST_CHAPTER -> SortModeSetting.LATEST_CHAPTER
-                        LibrarySort.CHAPTER_FETCH_DATE -> SortModeSetting.DATE_FETCHED
+                        LibrarySort.CHAPTER_FETCH_DATE -> SortModeSetting.CHAPTER_FETCH_DATE
                         LibrarySort.DATE_ADDED -> SortModeSetting.DATE_ADDED
                         LibrarySort.DRAG_AND_DROP -> SortModeSetting.DRAG_AND_DROP
                         LibrarySort.TAG_LIST -> SortModeSetting.TAG_LIST
@@ -415,7 +416,7 @@ object EXHMigrations {
                                         source = it.substringBefore(':').toLongOrNull() ?: return@forEach,
                                         name = content["name"]!!.jsonPrimitive.content,
                                         query = content["query"]!!.jsonPrimitive.contentOrNull?.nullIfBlank(),
-                                        filters_json = Json.encodeToString(content["filters"]!!.jsonArray)
+                                        filters_json = Json.encodeToString(content["filters"]!!.jsonArray),
                                     )
                                 }
                             }
@@ -442,6 +443,17 @@ object EXHMigrations {
                         preferences.navigationModePager().set(5)
                         preferences.navigationModeWebtoon().set(5)
                     }
+                }
+                if (oldVersion under 35) {
+                    // Handle renamed enum values
+                    @Suppress("DEPRECATION")
+                    val newSortingMode = when (val oldSortingMode = preferences.librarySortingMode().get()) {
+                        SortModeSetting.LAST_CHECKED -> SortModeSetting.LAST_MANGA_UPDATE
+                        SortModeSetting.UNREAD -> SortModeSetting.UNREAD_COUNT
+                        SortModeSetting.DATE_FETCHED -> SortModeSetting.CHAPTER_FETCH_DATE
+                        else -> oldSortingMode
+                    }
+                    preferences.librarySortingMode().set(newSortingMode)
                 }
 
                 // if (oldVersion under 1) { } (1 is current release version)

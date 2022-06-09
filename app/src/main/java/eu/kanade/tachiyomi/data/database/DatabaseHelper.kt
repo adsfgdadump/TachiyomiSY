@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.data.database
 
-import android.content.Context
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import com.pushtorefresh.storio.sqlite.impl.DefaultStorIOSQLite
 import eu.kanade.tachiyomi.data.database.mappers.CategoryTypeMapping
@@ -40,14 +39,11 @@ import exh.savedsearches.mappers.FeedSavedSearchTypeMapping
 import exh.savedsearches.mappers.SavedSearchTypeMapping
 import exh.savedsearches.models.FeedSavedSearch
 import exh.savedsearches.models.SavedSearch
-import exh.savedsearches.queries.FeedSavedSearchQueries
-import exh.savedsearches.queries.SavedSearchQueries
 
 /**
  * This class provides operations to manage the database through its interfaces.
  */
-open class DatabaseHelper(
-    context: Context,
+class DatabaseHelper(
     openHelper: SupportSQLiteOpenHelper,
 ) :
     MangaQueries,
@@ -61,9 +57,7 @@ open class DatabaseHelper(
     SearchTagQueries,
     SearchTitleQueries,
     MergedQueries,
-    FavoriteEntryQueries,
-    SavedSearchQueries,
-    FeedSavedSearchQueries
+    FavoriteEntryQueries
 /* SY <-- */ {
 
     override val db = DefaultStorIOSQLite.builder()
