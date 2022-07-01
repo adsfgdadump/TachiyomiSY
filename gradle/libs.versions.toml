@@ -1,9 +1,9 @@
 [versions]
-aboutlib_version = "10.3.0"
-okhttp_version = "4.9.3"
+aboutlib_version = "10.3.1"
+okhttp_version = "4.10.0"
 nucleus_version = "3.0.0"
 coil_version = "2.1.0"
-conductor_version = "3.1.4"
+conductor_version = "3.1.5"
 flowbinding_version = "1.2.0"
 shizuku_version = "12.1.0"
 sqldelight = "1.5.3"
@@ -37,7 +37,7 @@ disklrucache = "com.jakewharton:disklrucache:2.0.2"
 unifile = "com.github.tachiyomiorg:unifile:17bec43"
 junrar = "com.github.junrar:junrar:7.5.2"
 
-sqlitektx = "androidx.sqlite:sqlite-ktx:2.3.0-alpha02"
+sqlitektx = "androidx.sqlite:sqlite-ktx:2.3.0-alpha03"
 sqlite-android = "com.github.requery:sqlite-android:3.36.0"
 
 preferencektx = "androidx.preference:preference-ktx:1.2.0"
@@ -59,7 +59,7 @@ natural-comparator = "com.github.gpanther:java-nat-sort:natural-comparator-1.1"
 
 markwon = "io.noties.markwon:core:4.6.2"
 
-material = "com.google.android.material:material:1.7.0-alpha01"
+material = "com.google.android.material:material:1.7.0-alpha02"
 androidprocessbutton = "com.github.dmytrodanylyk.android-process-button:library:1.0.4"
 flexible-adapter-core = "com.github.arkon.FlexibleAdapter:flexible-adapter:c8013533"
 flexible-adapter-ui = "com.github.arkon.FlexibleAdapter:flexible-adapter-ui:c8013533"

@@ -7,12 +7,15 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import com.squareup.sqldelight.android.AndroidSqliteDriver
 import com.squareup.sqldelight.db.SqlDriver
+import data.Categories
 import data.History
 import data.Mangas
 import eu.kanade.data.AndroidDatabaseHandler
 import eu.kanade.data.DatabaseHandler
 import eu.kanade.data.dateAdapter
+import eu.kanade.data.listOfLongsAdapter
 import eu.kanade.data.listOfStringsAdapter
+import eu.kanade.data.listOfStringsAndAdapter
 import eu.kanade.tachiyomi.data.cache.ChapterCache
 import eu.kanade.tachiyomi.data.cache.CoverCache
 import eu.kanade.tachiyomi.data.database.DatabaseHelper
@@ -44,7 +47,7 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory<SupportSQLiteOpenHelper> {
             val configuration = SupportSQLiteOpenHelper.Configuration.builder(app)
                 .callback(DbOpenCallback())
-                .name(DbOpenCallback.DATABASE_NAME)
+                .name(DbOpenCallback.DATABASE_FILENAME)
                 .noBackupDirectory(false)
                 .build()
 
@@ -68,7 +71,15 @@ class AppModule(val app: Application) : InjektModule {
                 ),
                 mangasAdapter = Mangas.Adapter(
                     genreAdapter = listOfStringsAdapter,
+                    // SY -->
+                    filtered_scanlatorsAdapter = listOfStringsAndAdapter,
+                    // SY <--
                 ),
+                // SY -->
+                categoriesAdapter = Categories.Adapter(
+                    manga_orderAdapter = listOfLongsAdapter,
+                ),
+                // SY <--
             )
         }
 

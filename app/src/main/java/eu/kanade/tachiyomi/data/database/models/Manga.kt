@@ -3,7 +3,9 @@ package eu.kanade.tachiyomi.data.database.models
 import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.ui.reader.setting.OrientationType
 import eu.kanade.tachiyomi.ui.reader.setting.ReadingModeType
+import exh.md.utils.MdUtil
 import tachiyomi.source.model.MangaInfo
+import eu.kanade.domain.manga.model.Manga as DomainManga
 
 interface Manga : SManga {
 
@@ -134,5 +136,33 @@ fun Manga.toMangaInfo(): MangaInfo {
         key = this.url,
         status = this.status,
         title = this.title,
+    )
+}
+
+fun Manga.toDomainManga(): DomainManga? {
+    val mangaId = id ?: return null
+    return DomainManga(
+        id = mangaId,
+        source = source,
+        favorite = favorite,
+        lastUpdate = last_update,
+        dateAdded = date_added,
+        viewerFlags = viewer_flags.toLong(),
+        chapterFlags = chapter_flags.toLong(),
+        coverLastModified = cover_last_modified,
+        url = url,
+        // SY -->
+        ogTitle = originalTitle,
+        ogArtist = originalArtist,
+        ogAuthor = originalAuthor,
+        ogDescription = originalDescription,
+        ogGenre = getOriginalGenres(),
+        ogStatus = originalStatus.toLong(),
+        // SY <--
+        thumbnailUrl = thumbnail_url,
+        initialized = initialized,
+        // SY -->
+        filteredScanlators = MdUtil.getScanlators(filtered_scanlators).toList(),
+        // SY <--
     )
 }

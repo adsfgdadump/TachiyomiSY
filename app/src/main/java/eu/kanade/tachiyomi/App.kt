@@ -39,8 +39,11 @@ import com.google.firebase.ktx.Firebase
 import com.ms_square.debugoverlay.DebugOverlay
 import com.ms_square.debugoverlay.modules.FpsModule
 import eu.kanade.domain.DomainModule
+import eu.kanade.domain.SYDomainModule
+import eu.kanade.tachiyomi.data.coil.DomainMangaKeyer
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
+import eu.kanade.tachiyomi.data.coil.MangaKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.preference.PreferenceValues
@@ -103,6 +106,9 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
 
         Injekt.importModule(AppModule(this))
         Injekt.importModule(DomainModule())
+        // SY -->
+        Injekt.importModule(SYDomainModule())
+        // SY <--
 
         setupNotificationChannels()
         if ((BuildConfig.DEBUG || BuildConfig.BUILD_TYPE == "releaseTest") && DebugToggles.ENABLE_DEBUG_OVERLAY.enabled) {
@@ -167,6 +173,10 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
                 }
                 add(TachiyomiImageDecoder.Factory())
                 add(MangaCoverFetcher.Factory(lazy(callFactoryInit), lazy(diskCacheInit)))
+                add(MangaCoverFetcher.DomainMangaFactory(lazy(callFactoryInit), lazy(diskCacheInit)))
+                add(MangaCoverFetcher.MangaCoverFactory(lazy(callFactoryInit), lazy(diskCacheInit)))
+                add(MangaKeyer())
+                add(DomainMangaKeyer())
                 add(MangaCoverKeyer())
             }
             callFactory(callFactoryInit)

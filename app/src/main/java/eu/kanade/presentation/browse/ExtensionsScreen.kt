@@ -41,7 +41,7 @@ import com.google.accompanist.swiperefresh.SwipeRefresh
 import com.google.accompanist.swiperefresh.rememberSwipeRefreshState
 import eu.kanade.presentation.browse.components.BaseBrowseItem
 import eu.kanade.presentation.browse.components.ExtensionIcon
-import eu.kanade.presentation.components.ScrollbarLazyColumn
+import eu.kanade.presentation.components.FastScrollLazyColumn
 import eu.kanade.presentation.components.SwipeRefreshIndicator
 import eu.kanade.presentation.theme.header
 import eu.kanade.presentation.util.horizontalPadding
@@ -116,7 +116,7 @@ fun ExtensionContent(
 ) {
     var trustState by remember { mutableStateOf<Extension.Untrusted?>(null) }
 
-    ScrollbarLazyColumn(
+    FastScrollLazyColumn(
         contentPadding = WindowInsets.navigationBars.asPaddingValues() + topPaddingValues,
     ) {
         items(
@@ -303,7 +303,9 @@ fun ExtensionItemContent(
 
             if (warning != null) {
                 Text(
-                    text = stringResource(id = warning).uppercase() /* SY --> */ plusRepo extension /* SY <-- */,
+                    text = stringResource(warning).uppercase() /* SY --> */ plusRepo extension /* SY <-- */,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.error,
                     ),
@@ -311,6 +313,8 @@ fun ExtensionItemContent(
             } /* SY --> */ else if (extension is Extension.Available && extension.isRepoSource) {
                 Text(
                     text = stringResource(R.string.repo_source).uppercase(),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     style = MaterialTheme.typography.bodySmall.copy(
                         color = MaterialTheme.colorScheme.error,
                     ),
@@ -405,7 +409,7 @@ fun ExtensionHeader(
     action: @Composable RowScope.() -> Unit = {},
 ) {
     ExtensionHeader(
-        text = stringResource(id = textRes),
+        text = stringResource(textRes),
         modifier = modifier,
         action = action,
     )

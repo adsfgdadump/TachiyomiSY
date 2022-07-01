@@ -641,7 +641,7 @@ class LibraryPresenter(
                     val mergedSource = sourceManager.get(MERGED_SOURCE_ID) as MergedSource
                     val mergedMangas = db.getMergedMangas(manga.id!!).executeAsBlocking()
                     mergedSource
-                        .getChaptersAsBlocking(manga)
+                        .getChaptersAsBlocking(manga.id!!)
                         .filter { !it.read }
                         .groupBy { it.manga_id!! }
                         .forEach ab@{ (mangaId, chapters) ->
@@ -682,7 +682,7 @@ class LibraryPresenter(
                     manga.artist.takeUnless { it == manga.originalArtist },
                     manga.description.takeUnless { it == manga.originalDescription },
                     manga.genre.takeUnless { it == manga.originalGenre }?.let { manga.getGenres() },
-                    manga.status.takeUnless { it == manga.originalStatus },
+                    manga.status.takeUnless { it == manga.originalStatus }?.toLong(),
                 )
             }
             if (mangaJson != null) {
@@ -710,7 +710,11 @@ class LibraryPresenter(
     fun markReadStatus(mangas: List<Manga>, read: Boolean) {
         mangas.forEach { manga ->
             launchIO {
-                val chapters = if (manga.source == MERGED_SOURCE_ID) (sourceManager.get(MERGED_SOURCE_ID) as MergedSource).getChaptersAsBlocking(manga) else db.getChapters(manga).executeAsBlocking()
+                val chapters = if (manga.source == MERGED_SOURCE_ID) {
+                    (sourceManager.get(MERGED_SOURCE_ID) as MergedSource).getChaptersAsBlocking(manga.id!!)
+                } else {
+                    db.getChapters(manga).executeAsBlocking()
+                }
                 chapters.forEach {
                     it.read = read
                     if (!read) {
@@ -815,7 +819,7 @@ class LibraryPresenter(
     /** Returns first unread chapter of a manga */
     fun getFirstUnread(manga: Manga): Chapter? {
         val chapters = if (manga.source == MERGED_SOURCE_ID) {
-            (sourceManager.get(MERGED_SOURCE_ID) as MergedSource).getChaptersAsBlocking(manga)
+            (sourceManager.get(MERGED_SOURCE_ID) as MergedSource).getChaptersAsBlocking(manga.id!!)
         } else db.getChapters(manga).executeAsBlocking()
         return if (manga.isEhBasedManga()) {
             val chapter = chapters.sortedBy { it.source_order }.getOrNull(0)

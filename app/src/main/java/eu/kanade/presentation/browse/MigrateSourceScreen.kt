@@ -1,5 +1,8 @@
 package eu.kanade.presentation.browse
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.navigationBars
@@ -12,13 +15,16 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import eu.kanade.domain.source.model.Source
 import eu.kanade.presentation.browse.components.BaseSourceItem
+import eu.kanade.presentation.browse.components.SourceIcon
 import eu.kanade.presentation.components.EmptyScreen
 import eu.kanade.presentation.components.ItemBadges
 import eu.kanade.presentation.components.LoadingScreen
@@ -30,6 +36,7 @@ import eu.kanade.presentation.util.topPaddingValues
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.ui.browse.migration.sources.MigrateSourceState
 import eu.kanade.tachiyomi.ui.browse.migration.sources.MigrationSourcesPresenter
+import eu.kanade.tachiyomi.util.system.LocaleHelper
 
 @Composable
 fun MigrateSourceScreen(
@@ -37,7 +44,9 @@ fun MigrateSourceScreen(
     presenter: MigrationSourcesPresenter,
     onClickItem: (Source) -> Unit,
     onLongClickItem: (Source) -> Unit,
+    // SY -->
     onClickAll: (Source) -> Unit,
+    // SY <--
 ) {
     val state by presenter.state.collectAsState()
     when (state) {
@@ -49,7 +58,9 @@ fun MigrateSourceScreen(
                 list = (state as MigrateSourceState.Success).sources,
                 onClickItem = onClickItem,
                 onLongClickItem = onLongClickItem,
+                // SY -->
                 onClickAll = onClickAll,
+                // SY <--
             )
     }
 }
@@ -60,7 +71,9 @@ fun MigrateSourceList(
     list: List<Pair<Source, Long>>,
     onClickItem: (Source) -> Unit,
     onLongClickItem: (Source) -> Unit,
+    // SY -->
     onClickAll: (Source) -> Unit,
+    // SY <--
 ) {
     if (list.isEmpty()) {
         EmptyScreen(textResource = R.string.information_empty_library)
@@ -93,7 +106,9 @@ fun MigrateSourceList(
                 count = count,
                 onClickItem = { onClickItem(source) },
                 onLongClickItem = { onLongClickItem(source) },
+                // SY -->
                 onClickAll = { onClickAll(source) },
+                // SY <--
             )
         }
     }
@@ -106,7 +121,9 @@ fun MigrateSourceItem(
     count: Long,
     onClickItem: () -> Unit,
     onLongClickItem: () -> Unit,
+    // SY -->
     onClickAll: () -> Unit,
+    // SY <--
 ) {
     BaseSourceItem(
         modifier = modifier,
@@ -114,8 +131,10 @@ fun MigrateSourceItem(
         showLanguageInContent = source.lang != "",
         onClickItem = onClickItem,
         onLongClickItem = onLongClickItem,
+        icon = { SourceIcon(source = source) },
         action = {
             ItemBadges(primaryText = "$count")
+            // SY -->
             TextButton(onClick = onClickAll) {
                 Text(
                     text = stringResource(id = R.string.all),
@@ -123,6 +142,43 @@ fun MigrateSourceItem(
                         color = MaterialTheme.colorScheme.primary,
                     ),
                 )
+            }
+            // SY <--
+        },
+        content = { source, showLanguageInContent ->
+            Column(
+                modifier = Modifier
+                    .padding(horizontal = horizontalPadding)
+                    .weight(1f),
+            ) {
+                Text(
+                    text = source.name.ifBlank { source.id.toString() },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (showLanguageInContent) {
+                        Text(
+                            text = LocaleHelper.getDisplayName(source.lang),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                    if (source.isStub) {
+                        Text(
+                            text = stringResource(R.string.not_installed),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
             }
         },
     )
