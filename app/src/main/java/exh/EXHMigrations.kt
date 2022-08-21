@@ -2,22 +2,24 @@
 
 package exh
 
-import android.content.Context
 import androidx.core.content.edit
 import androidx.preference.PreferenceManager
-import com.pushtorefresh.storio.sqlite.queries.DeleteQuery
-import com.pushtorefresh.storio.sqlite.queries.Query
-import com.pushtorefresh.storio.sqlite.queries.RawQuery
 import eu.kanade.data.DatabaseHandler
+import eu.kanade.data.category.categoryMapper
+import eu.kanade.data.chapter.chapterMapper
+import eu.kanade.domain.chapter.interactor.DeleteChapters
+import eu.kanade.domain.chapter.interactor.UpdateChapter
+import eu.kanade.domain.chapter.model.ChapterUpdate
+import eu.kanade.domain.manga.interactor.GetManga
+import eu.kanade.domain.manga.interactor.GetMangaBySource
+import eu.kanade.domain.manga.interactor.InsertMergedReference
+import eu.kanade.domain.manga.interactor.UpdateManga
+import eu.kanade.domain.manga.model.MangaUpdate
+import eu.kanade.domain.source.interactor.InsertFeedSavedSearch
+import eu.kanade.domain.source.interactor.InsertSavedSearch
 import eu.kanade.tachiyomi.BuildConfig
 import eu.kanade.tachiyomi.data.backup.BackupCreatorJob
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
-import eu.kanade.tachiyomi.data.database.models.Chapter
 import eu.kanade.tachiyomi.data.database.models.Manga
-import eu.kanade.tachiyomi.data.database.resolvers.MangaUrlPutResolver
-import eu.kanade.tachiyomi.data.database.tables.ChapterTable
-import eu.kanade.tachiyomi.data.database.tables.MangaTable
-import eu.kanade.tachiyomi.data.database.tables.TrackTable
 import eu.kanade.tachiyomi.data.library.LibraryUpdateJob
 import eu.kanade.tachiyomi.data.preference.MANGA_NON_COMPLETED
 import eu.kanade.tachiyomi.data.preference.PreferenceKeys
@@ -29,20 +31,20 @@ import eu.kanade.tachiyomi.extension.ExtensionUpdateJob
 import eu.kanade.tachiyomi.network.PREF_DOH_CLOUDFLARE
 import eu.kanade.tachiyomi.source.Source
 import eu.kanade.tachiyomi.source.SourceManager
-import eu.kanade.tachiyomi.source.model.SManga
 import eu.kanade.tachiyomi.source.online.all.Hitomi
 import eu.kanade.tachiyomi.source.online.all.NHentai
-import eu.kanade.tachiyomi.ui.library.LibrarySort
 import eu.kanade.tachiyomi.ui.library.setting.DisplayModeSetting
 import eu.kanade.tachiyomi.ui.library.setting.SortDirectionSetting
 import eu.kanade.tachiyomi.ui.library.setting.SortModeSetting
 import eu.kanade.tachiyomi.ui.reader.setting.OrientationType
 import eu.kanade.tachiyomi.util.preference.minusAssign
 import eu.kanade.tachiyomi.util.system.DeviceUtil
+import eu.kanade.tachiyomi.util.system.logcat
 import exh.eh.EHentaiUpdateWorker
 import exh.log.xLogE
-import exh.log.xLogW
 import exh.merged.sql.models.MergedMangaReference
+import exh.savedsearches.models.FeedSavedSearch
+import exh.savedsearches.models.SavedSearch
 import exh.source.BlacklistedSources
 import exh.source.EH_SOURCE_ID
 import exh.source.HBROWSE_SOURCE_ID
@@ -68,11 +70,19 @@ import uy.kohesive.injekt.injectLazy
 import java.io.File
 import java.net.URI
 import java.net.URISyntaxException
+import eu.kanade.domain.manga.model.Manga as DomainManga
 
 object EXHMigrations {
-    private val db: DatabaseHelper by injectLazy()
-    private val database: DatabaseHandler by injectLazy()
+    private val handler: DatabaseHandler by injectLazy()
     private val sourceManager: SourceManager by injectLazy()
+    private val getManga: GetManga by injectLazy()
+    private val getMangaBySource: GetMangaBySource by injectLazy()
+    private val updateManga: UpdateManga by injectLazy()
+    private val updateChapter: UpdateChapter by injectLazy()
+    private val deleteChapters: DeleteChapters by injectLazy()
+    private val insertMergedReference: InsertMergedReference by injectLazy()
+    private val insertSavedSearch: InsertSavedSearch by injectLazy()
+    private val insertFeedSavedSearch: InsertFeedSavedSearch by injectLazy()
 
     /**
      * Performs a migration when the application is updated.
@@ -102,140 +112,94 @@ object EXHMigrations {
 
                 val prefs = PreferenceManager.getDefaultSharedPreferences(context)
                 if (oldVersion under 4) {
-                    db.inTransaction {
-                        updateSourceId(HBROWSE_SOURCE_ID, 6912)
-                        // Migrate BHrowse URLs
-                        val hBrowseManga = db.db.get()
-                            .listOfObjects(Manga::class.java)
-                            .withQuery(
-                                Query.builder()
-                                    .table(MangaTable.TABLE)
-                                    .where("${MangaTable.COL_SOURCE} = $HBROWSE_SOURCE_ID")
-                                    .build(),
-                            )
-                            .prepare()
-                            .executeAsBlocking()
-                        hBrowseManga.forEach {
-                            it.url = it.url + "/c00001/"
-                        }
+                    updateSourceId(HBROWSE_SOURCE_ID, 6912)
+                    // Migrate BHrowse URLs
+                    val hBrowseManga = runBlocking { getMangaBySource.await(HBROWSE_SOURCE_ID) }
+                    val mangaUpdates = hBrowseManga.map {
+                        MangaUpdate(it.id, url = it.url + "/c00001/")
+                    }
 
-                        db.db.put()
-                            .objects(hBrowseManga)
-                            // Extremely slow without the resolver :/
-                            .withPutResolver(MangaUrlPutResolver())
-                            .prepare()
-                            .executeAsBlocking()
+                    runBlocking {
+                        updateManga.awaitAll(mangaUpdates)
                     }
                 }
                 if (oldVersion under 5) {
-                    db.inTransaction {
-                        // Migrate Hitomi source IDs
-                        updateSourceId(Hitomi.otherId, 6910)
-                    }
+                    // Migrate Hitomi source IDs
+                    updateSourceId(Hitomi.otherId, 6910)
                 }
                 if (oldVersion under 6) {
-                    db.inTransaction {
-                        updateSourceId(PERV_EDEN_EN_SOURCE_ID, 6905)
-                        updateSourceId(PERV_EDEN_IT_SOURCE_ID, 6906)
-                        updateSourceId(NHentai.otherId, 6907)
-                    }
+                    updateSourceId(PERV_EDEN_EN_SOURCE_ID, 6905)
+                    updateSourceId(PERV_EDEN_IT_SOURCE_ID, 6906)
+                    updateSourceId(NHentai.otherId, 6907)
                 }
                 if (oldVersion under 7) {
-                    db.inTransaction {
-                        val mergedMangas = db.db.get()
-                            .listOfObjects(Manga::class.java)
-                            .withQuery(
-                                Query.builder()
-                                    .table(MangaTable.TABLE)
-                                    .where("${MangaTable.COL_SOURCE} = $MERGED_SOURCE_ID")
-                                    .build(),
-                            )
-                            .prepare()
-                            .executeAsBlocking()
+                    val mergedMangas = runBlocking { getMangaBySource.await(MERGED_SOURCE_ID) }
 
-                        if (mergedMangas.isNotEmpty()) {
-                            val mangaConfigs = mergedMangas.mapNotNull { mergedManga -> readMangaConfig(mergedManga)?.let { mergedManga to it } }
-                            if (mangaConfigs.isNotEmpty()) {
-                                val mangaToUpdate = mutableListOf<Manga>()
-                                val mergedMangaReferences = mutableListOf<MergedMangaReference>()
-                                mangaConfigs.onEach { mergedManga ->
-                                    mergedManga.second.children.firstOrNull()?.url?.let {
-                                        if (db.getManga(it, MERGED_SOURCE_ID).executeAsBlocking() != null) return@onEach
-                                        mergedManga.first.url = it
-                                    }
-                                    mangaToUpdate += mergedManga.first
+                    if (mergedMangas.isNotEmpty()) {
+                        val mangaConfigs = mergedMangas.mapNotNull { mergedManga -> readMangaConfig(mergedManga)?.let { mergedManga to it } }
+                        if (mangaConfigs.isNotEmpty()) {
+                            val mangaToUpdate = mutableListOf<MangaUpdate>()
+                            val mergedMangaReferences = mutableListOf<MergedMangaReference>()
+                            mangaConfigs.onEach { mergedManga ->
+                                val newFirst = mergedManga.second.children.firstOrNull()?.url?.let {
+                                    if (runBlocking { getManga.await(it, MERGED_SOURCE_ID) } != null) return@onEach
+                                    mangaToUpdate += MangaUpdate(id = mergedManga.first.id, url = it)
+                                    mergedManga.first.copy(url = it)
+                                } ?: mergedManga.first
+                                mergedMangaReferences += MergedMangaReference(
+                                    id = null,
+                                    isInfoManga = false,
+                                    getChapterUpdates = false,
+                                    chapterSortMode = 0,
+                                    chapterPriority = 0,
+                                    downloadChapters = false,
+                                    mergeId = newFirst.id,
+                                    mergeUrl = newFirst.url,
+                                    mangaId = newFirst.id,
+                                    mangaUrl = newFirst.url,
+                                    mangaSourceId = MERGED_SOURCE_ID,
+                                )
+                                mergedManga.second.children.distinct().forEachIndexed { index, mangaSource ->
+                                    val load = mangaSource.load() ?: return@forEachIndexed
                                     mergedMangaReferences += MergedMangaReference(
                                         id = null,
-                                        isInfoManga = false,
-                                        getChapterUpdates = false,
+                                        isInfoManga = index == 0,
+                                        getChapterUpdates = true,
                                         chapterSortMode = 0,
                                         chapterPriority = 0,
-                                        downloadChapters = false,
-                                        mergeId = mergedManga.first.id!!,
-                                        mergeUrl = mergedManga.first.url,
-                                        mangaId = mergedManga.first.id!!,
-                                        mangaUrl = mergedManga.first.url,
-                                        mangaSourceId = MERGED_SOURCE_ID,
+                                        downloadChapters = true,
+                                        mergeId = newFirst.id,
+                                        mergeUrl = newFirst.url,
+                                        mangaId = load.manga.id,
+                                        mangaUrl = load.manga.url,
+                                        mangaSourceId = load.source.id,
                                     )
-                                    mergedManga.second.children.distinct().forEachIndexed { index, mangaSource ->
-                                        val load = mangaSource.load(db, sourceManager) ?: return@forEachIndexed
-                                        mergedMangaReferences += MergedMangaReference(
-                                            id = null,
-                                            isInfoManga = index == 0,
-                                            getChapterUpdates = true,
-                                            chapterSortMode = 0,
-                                            chapterPriority = 0,
-                                            downloadChapters = true,
-                                            mergeId = mergedManga.first.id!!,
-                                            mergeUrl = mergedManga.first.url,
-                                            mangaId = load.manga.id!!,
-                                            mangaUrl = load.manga.url,
-                                            mangaSourceId = load.source.id,
-                                        )
-                                    }
                                 }
-                                db.db.put()
-                                    .objects(mangaToUpdate)
-                                    // Extremely slow without the resolver :/
-                                    .withPutResolver(MangaUrlPutResolver())
-                                    .prepare()
-                                    .executeAsBlocking()
-                                db.insertMergedMangas(mergedMangaReferences).executeAsBlocking()
+                            }
+                            runBlocking {
+                                updateManga.awaitAll(mangaToUpdate)
+                                insertMergedReference.awaitAll(mergedMangaReferences)
+                            }
 
-                                val loadedMangaList = mangaConfigs.map { it.second.children }.flatten().mapNotNull { it.load(db, sourceManager) }.distinct()
-                                val chapters = db.db.get()
-                                    .listOfObjects(Chapter::class.java)
-                                    .withQuery(
-                                        Query.builder()
-                                            .table(ChapterTable.TABLE)
-                                            .where("${ChapterTable.COL_MANGA_ID} IN (${mergedMangas.filter { it.id != null }.joinToString { it.id.toString() }})")
-                                            .build(),
+                            val loadedMangaList = mangaConfigs.map { it.second.children }.flatten().mapNotNull { it.load() }.distinct()
+                            val chapters = runBlocking { handler.awaitList { ehQueries.getChaptersByMangaIds(mergedMangas.map { it.id }, chapterMapper) } }
+                            val mergedMangaChapters = runBlocking { handler.awaitList { ehQueries.getChaptersByMangaIds(loadedMangaList.map { it.manga.id }, chapterMapper) } }
+
+                            val mergedMangaChaptersMatched = mergedMangaChapters.mapNotNull { chapter -> loadedMangaList.firstOrNull { it.manga.id == chapter.id }?.let { it to chapter } }
+                            val parsedChapters = chapters.filter { it.read || it.lastPageRead != 0L }.mapNotNull { chapter -> readUrlConfig(chapter.url)?.let { chapter to it } }
+                            val chaptersToUpdate = mutableListOf<ChapterUpdate>()
+                            parsedChapters.forEach { parsedChapter ->
+                                mergedMangaChaptersMatched.firstOrNull { it.second.url == parsedChapter.second.url && it.first.source.id == parsedChapter.second.source && it.first.manga.url == parsedChapter.second.mangaUrl }?.let {
+                                    chaptersToUpdate += ChapterUpdate(
+                                        it.second.id,
+                                        read = parsedChapter.first.read,
+                                        lastPageRead = parsedChapter.first.lastPageRead,
                                     )
-                                    .prepare()
-                                    .executeAsBlocking()
-                                val mergedMangaChapters = db.db.get()
-                                    .listOfObjects(Chapter::class.java)
-                                    .withQuery(
-                                        Query.builder()
-                                            .table(ChapterTable.TABLE)
-                                            .where("${ChapterTable.COL_MANGA_ID} IN (${loadedMangaList.filter { it.manga.id != null }.joinToString { it.manga.id.toString() }})")
-                                            .build(),
-                                    )
-                                    .prepare()
-                                    .executeAsBlocking()
-                                val mergedMangaChaptersMatched = mergedMangaChapters.mapNotNull { chapter -> loadedMangaList.firstOrNull { it.manga.id == chapter.id }?.let { it to chapter } }
-                                val parsedChapters = chapters.filter { it.read || it.last_page_read != 0 }.mapNotNull { chapter -> readUrlConfig(chapter.url)?.let { chapter to it } }
-                                val chaptersToUpdate = mutableListOf<Chapter>()
-                                parsedChapters.forEach { parsedChapter ->
-                                    mergedMangaChaptersMatched.firstOrNull { it.second.url == parsedChapter.second.url && it.first.source.id == parsedChapter.second.source && it.first.manga.url == parsedChapter.second.mangaUrl }?.let {
-                                        chaptersToUpdate += it.second.apply {
-                                            read = parsedChapter.first.read
-                                            last_page_read = parsedChapter.first.last_page_read
-                                        }
-                                    }
                                 }
-                                db.deleteChapters(mergedMangaChapters).executeAsBlocking()
-                                db.updateChaptersProgress(chaptersToUpdate).executeAsBlocking()
+                            }
+                            runBlocking {
+                                deleteChapters.await(mergedMangaChapters.map { it.id })
+                                updateChapter.awaitAll(chaptersToUpdate)
                             }
                         }
                     }
@@ -289,13 +253,9 @@ object EXHMigrations {
                     }
 
                     // Delete old mangadex trackers
-                    db.db.lowLevel().delete(
-                        DeleteQuery.builder()
-                            .table(TrackTable.TABLE)
-                            .where("${TrackTable.COL_SYNC_ID} = ?")
-                            .whereArgs(6)
-                            .build(),
-                    )
+                    runBlocking {
+                        handler.await { ehQueries.deleteBySyncId(6) }
+                    }
                 }
                 if (oldVersion under 18) {
                     val readerTheme = preferences.readerTheme().get()
@@ -309,36 +269,40 @@ object EXHMigrations {
                     }
                 }
                 if (oldVersion under 20) {
-                    val oldSortingMode = prefs.getInt(PreferenceKeys.librarySortingMode, 0)
-                    val oldSortingDirection = prefs.getBoolean(PreferenceKeys.librarySortingDirection, true)
+                    try {
+                        val oldSortingMode = prefs.getInt(PreferenceKeys.librarySortingMode, 0 /* ALPHABETICAL */)
+                        val oldSortingDirection = prefs.getBoolean(PreferenceKeys.librarySortingDirection, true)
 
-                    val newSortingMode = when (oldSortingMode) {
-                        LibrarySort.ALPHA -> SortModeSetting.ALPHABETICAL
-                        LibrarySort.LAST_READ -> SortModeSetting.LAST_READ
-                        LibrarySort.LAST_CHECKED -> SortModeSetting.LAST_MANGA_UPDATE
-                        LibrarySort.UNREAD -> SortModeSetting.UNREAD_COUNT
-                        LibrarySort.TOTAL -> SortModeSetting.TOTAL_CHAPTERS
-                        LibrarySort.LATEST_CHAPTER -> SortModeSetting.LATEST_CHAPTER
-                        LibrarySort.CHAPTER_FETCH_DATE -> SortModeSetting.CHAPTER_FETCH_DATE
-                        LibrarySort.DATE_ADDED -> SortModeSetting.DATE_ADDED
-                        LibrarySort.DRAG_AND_DROP -> SortModeSetting.DRAG_AND_DROP
-                        LibrarySort.TAG_LIST -> SortModeSetting.TAG_LIST
-                        else -> SortModeSetting.ALPHABETICAL
-                    }
+                        val newSortingMode = when (oldSortingMode) {
+                            0 -> SortModeSetting.ALPHABETICAL
+                            1 -> SortModeSetting.LAST_READ
+                            2 -> SortModeSetting.LAST_MANGA_UPDATE
+                            3 -> SortModeSetting.UNREAD_COUNT
+                            4 -> SortModeSetting.TOTAL_CHAPTERS
+                            6 -> SortModeSetting.LATEST_CHAPTER
+                            7 -> SortModeSetting.DRAG_AND_DROP
+                            8 -> SortModeSetting.DATE_ADDED
+                            9 -> SortModeSetting.TAG_LIST
+                            10 -> SortModeSetting.CHAPTER_FETCH_DATE
+                            else -> SortModeSetting.ALPHABETICAL
+                        }
 
-                    val newSortingDirection = when (oldSortingDirection) {
-                        true -> SortDirectionSetting.ASCENDING
-                        else -> SortDirectionSetting.DESCENDING
-                    }
+                        val newSortingDirection = when (oldSortingDirection) {
+                            true -> SortDirectionSetting.ASCENDING
+                            else -> SortDirectionSetting.DESCENDING
+                        }
 
-                    prefs.edit(commit = true) {
-                        remove(PreferenceKeys.librarySortingMode)
-                        remove(PreferenceKeys.librarySortingDirection)
-                    }
+                        prefs.edit(commit = true) {
+                            remove(PreferenceKeys.librarySortingMode)
+                            remove(PreferenceKeys.librarySortingDirection)
+                        }
 
-                    prefs.edit {
-                        putString(PreferenceKeys.librarySortingMode, newSortingMode.name)
-                        putString(PreferenceKeys.librarySortingDirection, newSortingDirection.name)
+                        prefs.edit {
+                            putString(PreferenceKeys.librarySortingMode, newSortingMode.name)
+                            putString(PreferenceKeys.librarySortingDirection, newSortingDirection.name)
+                        }
+                    } catch (e: Exception) {
+                        logcat(throwable = e) { "Already done migration" }
                     }
                 }
                 if (oldVersion under 21) {
@@ -407,29 +371,32 @@ object EXHMigrations {
                 }
                 if (oldVersion under 31) {
                     runBlocking {
-                        database.await(true) {
-                            prefs.getStringSet("eh_saved_searches", emptySet())?.forEach {
-                                kotlin.runCatching {
-                                    val content = Json.decodeFromString<JsonObject>(it.substringAfter(':'))
-                                    saved_searchQueries.insertSavedSearch(
-                                        _id = null,
-                                        source = it.substringBefore(':').toLongOrNull() ?: return@forEach,
-                                        name = content["name"]!!.jsonPrimitive.content,
-                                        query = content["query"]!!.jsonPrimitive.contentOrNull?.nullIfBlank(),
-                                        filters_json = Json.encodeToString(content["filters"]!!.jsonArray),
-                                    )
-                                }
-                            }
-                        }
-                        database.await(true) {
-                            prefs.getStringSet("latest_tab_sources", emptySet())?.forEach {
-                                feed_saved_searchQueries.insertFeedSavedSearch(
-                                    _id = null,
-                                    source = it.toLong(),
-                                    saved_search = null,
-                                    global = true,
+                        val savedSearch = prefs.getStringSet("eh_saved_searches", emptySet())?.mapNotNull {
+                            runCatching {
+                                val content = Json.decodeFromString<JsonObject>(it.substringAfter(':'))
+                                SavedSearch(
+                                    id = -1,
+                                    source = it.substringBefore(':').toLongOrNull()
+                                        ?: return@runCatching null,
+                                    name = content["name"]!!.jsonPrimitive.content,
+                                    query = content["query"]!!.jsonPrimitive.contentOrNull?.nullIfBlank(),
+                                    filtersJson = Json.encodeToString(content["filters"]!!.jsonArray),
                                 )
-                            }
+                            }.getOrNull()
+                        }
+                        if (!savedSearch.isNullOrEmpty()) {
+                            insertSavedSearch.awaitAll(savedSearch)
+                        }
+                        val feedSavedSearch = prefs.getStringSet("latest_tab_sources", emptySet())?.map {
+                            FeedSavedSearch(
+                                id = -1,
+                                source = it.toLong(),
+                                savedSearch = null,
+                                global = true,
+                            )
+                        }
+                        if (!feedSavedSearch.isNullOrEmpty()) {
+                            insertFeedSavedSearch.awaitAll(feedSavedSearch)
                         }
                     }
                     prefs.edit(commit = true) {
@@ -444,16 +411,31 @@ object EXHMigrations {
                         preferences.navigationModeWebtoon().set(5)
                     }
                 }
-                if (oldVersion under 35) {
+                if (oldVersion under 38) {
                     // Handle renamed enum values
                     @Suppress("DEPRECATION")
                     val newSortingMode = when (val oldSortingMode = preferences.librarySortingMode().get()) {
                         SortModeSetting.LAST_CHECKED -> SortModeSetting.LAST_MANGA_UPDATE
                         SortModeSetting.UNREAD -> SortModeSetting.UNREAD_COUNT
                         SortModeSetting.DATE_FETCHED -> SortModeSetting.CHAPTER_FETCH_DATE
+                        SortModeSetting.DRAG_AND_DROP -> SortModeSetting.ALPHABETICAL
                         else -> oldSortingMode
                     }
                     preferences.librarySortingMode().set(newSortingMode)
+                    runBlocking {
+                        handler.await(true) {
+                            categoriesQueries.getCategories(categoryMapper).executeAsList()
+                                .filter { SortModeSetting.fromFlag(it.flags and SortModeSetting.MASK) == SortModeSetting.DRAG_AND_DROP }
+                                .forEach {
+                                    categoriesQueries.update(
+                                        categoryId = it.id,
+                                        flags = it.flags xor SortModeSetting.DRAG_AND_DROP.flag,
+                                        name = null,
+                                        order = null,
+                                    )
+                                }
+                        }
+                    }
                 }
 
                 // if (oldVersion under 1) { } (1 is current release version)
@@ -503,18 +485,6 @@ object EXHMigrations {
         }
     }
 
-    private fun backupDatabase(context: Context, oldMigrationVersion: Int) {
-        val backupLocation = File(File(context.filesDir, "exh_db_bck"), "$oldMigrationVersion.bck.db")
-        if (backupLocation.exists()) return // Do not backup same version twice
-
-        val dbLocation = context.getDatabasePath(db.lowLevel().sqliteOpenHelper().databaseName)
-        try {
-            dbLocation.copyTo(backupLocation, overwrite = true)
-        } catch (t: Throwable) {
-            xLogW("Failed to backup database!")
-        }
-    }
-
     private fun getUrlWithoutDomain(orig: String): String {
         return try {
             val uri = URI(orig)
@@ -557,7 +527,7 @@ object EXHMigrations {
         }
     }
 
-    private fun readMangaConfig(manga: SManga): MangaConfig? {
+    private fun readMangaConfig(manga: DomainManga): MangaConfig? {
         return MangaConfig.readFromUrl(manga.url)
     }
 
@@ -568,8 +538,8 @@ object EXHMigrations {
         @SerialName("u")
         val url: String,
     ) {
-        fun load(db: DatabaseHelper, sourceManager: SourceManager): LoadedMangaSource? {
-            val manga = db.getManga(url, source).executeAsBlocking() ?: return null
+        fun load(): LoadedMangaSource? {
+            val manga = runBlocking { getManga.await(url, source) } ?: return null
             val source = sourceManager.getOrStub(source)
             return LoadedMangaSource(source, manga)
         }
@@ -583,20 +553,11 @@ object EXHMigrations {
         }
     }
 
-    private data class LoadedMangaSource(val source: Source, val manga: Manga)
+    private data class LoadedMangaSource(val source: Source, val manga: DomainManga)
 
     private fun updateSourceId(newId: Long, oldId: Long) {
-        db.lowLevel().executeSQL(
-            RawQuery.builder()
-                .query(
-                    """
-                    UPDATE ${MangaTable.TABLE}
-                        SET ${MangaTable.COL_SOURCE} = $newId
-                        WHERE ${MangaTable.COL_SOURCE} = $oldId
-                    """.trimIndent(),
-                )
-                .affectsTables(MangaTable.TABLE)
-                .build(),
-        )
+        runBlocking {
+            handler.await { ehQueries.migrateSource(newId, oldId) }
+        }
     }
 }

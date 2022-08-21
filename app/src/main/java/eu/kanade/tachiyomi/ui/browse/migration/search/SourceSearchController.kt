@@ -3,7 +3,7 @@ package eu.kanade.tachiyomi.ui.browse.migration.search
 import android.os.Bundle
 import android.view.View
 import androidx.core.os.bundleOf
-import eu.kanade.tachiyomi.data.database.models.Manga
+import eu.kanade.domain.manga.model.Manga
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.SourceManager
 import eu.kanade.tachiyomi.ui.browse.migration.advanced.process.MigrationListController

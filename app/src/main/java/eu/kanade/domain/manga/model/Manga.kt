@@ -2,6 +2,7 @@ package eu.kanade.domain.manga.model
 
 import eu.kanade.data.listOfStringsAdapter
 import eu.kanade.tachiyomi.data.cache.CoverCache
+import eu.kanade.tachiyomi.data.database.models.MangaImpl
 import eu.kanade.tachiyomi.data.library.CustomMangaManager
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
 import eu.kanade.tachiyomi.source.LocalSource
@@ -11,6 +12,7 @@ import tachiyomi.source.model.MangaInfo
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
+import java.io.Serializable
 import eu.kanade.tachiyomi.data.database.models.Manga as DbManga
 
 data class Manga(
@@ -36,7 +38,7 @@ data class Manga(
     // SY -->
     val filteredScanlators: List<String>?,
     // SY <--
-) {
+) : Serializable {
 
     // SY -->
     private val customMangaInfo = if (favorite) {
@@ -64,20 +66,6 @@ data class Manga(
 
     val sorting: Long
         get() = chapterFlags and CHAPTER_SORTING_MASK
-
-    fun toSManga(): SManga {
-        return SManga.create().also {
-            it.url = url
-            it.title = title
-            it.artist = artist
-            it.author = author
-            it.description = description
-            it.genre = genre.orEmpty().joinToString()
-            it.status = status.toInt()
-            it.thumbnail_url = thumbnailUrl
-            it.initialized = initialized
-        }
-    }
 
     val displayMode: Long
         get() = chapterFlags and CHAPTER_DISPLAY_MASK
@@ -129,6 +117,18 @@ data class Manga(
         return chapterFlags and CHAPTER_SORT_DIR_MASK == CHAPTER_SORT_DESC
     }
 
+    fun toSManga(): SManga = SManga.create().also {
+        it.url = url
+        it.title = title
+        it.artist = artist
+        it.author = author
+        it.description = description
+        it.genre = genre.orEmpty().joinToString()
+        it.status = status.toInt()
+        it.thumbnail_url = thumbnailUrl
+        it.initialized = initialized
+    }
+
     companion object {
         // Generic filter that does not filter anything
         const val SHOW_ALL = 0x00000000L
@@ -158,6 +158,33 @@ data class Manga(
         const val CHAPTER_DISPLAY_NUMBER = 0x00100000L
         const val CHAPTER_DISPLAY_MASK = 0x00100000L
 
+        fun create() = Manga(
+            id = -1L,
+            url = "",
+            // Sy -->
+            ogTitle = "",
+            // SY <--
+            source = -1L,
+            favorite = false,
+            lastUpdate = 0L,
+            dateAdded = 0L,
+            viewerFlags = 0L,
+            chapterFlags = 0L,
+            coverLastModified = 0L,
+            // SY -->
+            ogArtist = null,
+            ogAuthor = null,
+            ogDescription = null,
+            ogGenre = null,
+            ogStatus = 0L,
+            // SY <--
+            thumbnailUrl = null,
+            initialized = false,
+            // SY -->
+            filteredScanlators = null,
+            // SY <--
+        )
+
         // SY -->
         private val customMangaManager: CustomMangaManager by injectLazy()
         // SY <--
@@ -179,8 +206,9 @@ fun TriStateFilter.toTriStateGroupState(): ExtendedNavigationView.Item.TriStateG
 }
 
 // TODO: Remove when all deps are migrated
-fun Manga.toDbManga(): DbManga = DbManga.create(source).also {
+fun Manga.toDbManga(): DbManga = MangaImpl().also {
     it.id = id
+    it.source = source
     it.favorite = favorite
     it.last_update = lastUpdate
     it.date_added = dateAdded
@@ -212,6 +240,28 @@ fun Manga.toMangaInfo(): MangaInfo = MangaInfo(
     title = ogTitle,
     // SY <--
 )
+
+fun Manga.toMangaUpdate(): MangaUpdate {
+    return MangaUpdate(
+        id = id,
+        source = source,
+        favorite = favorite,
+        lastUpdate = lastUpdate,
+        dateAdded = dateAdded,
+        viewerFlags = viewerFlags,
+        chapterFlags = chapterFlags,
+        coverLastModified = coverLastModified,
+        url = url,
+        title = title,
+        artist = artist,
+        author = author,
+        description = description,
+        genre = genre,
+        status = status,
+        thumbnailUrl = thumbnailUrl,
+        initialized = initialized,
+    )
+}
 
 fun Manga.isLocal(): Boolean = source == LocalSource.ID
 

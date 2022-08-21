@@ -2,7 +2,6 @@ package eu.kanade.tachiyomi.ui.reader.viewer.pager
 
 import android.annotation.SuppressLint
 import android.content.Context
-import android.graphics.BitmapFactory
 import android.view.Gravity
 import android.view.LayoutInflater
 import androidx.core.view.isVisible
@@ -24,10 +23,12 @@ import rx.Observable
 import rx.Subscription
 import rx.android.schedulers.AndroidSchedulers
 import rx.schedulers.Schedulers
+import tachiyomi.decoder.ImageDecoder
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
+import kotlin.math.max
 import kotlin.math.roundToInt
 
 /**
@@ -353,7 +354,18 @@ class PagerPageHolder(
     }
 
     private fun mergePages(imageStream: InputStream, imageStream2: InputStream?): InputStream {
-        imageStream2 ?: return imageStream
+        // Handle adding a center margin to wide images if requested
+        if (imageStream2 == null) {
+            if (imageStream is BufferedInputStream && ImageUtil.isWideImage(imageStream) &&
+                viewer.config.centerMarginType and PagerConfig.CenterMarginType.WIDE_PAGE_CENTER_MARGIN > 0 &&
+                !viewer.config.imageCropBorders
+            ) {
+                return ImageUtil.AddHorizontalCenterMargin(imageStream, getHeight(), context)
+            } else {
+                return imageStream
+            }
+        }
+
         if (page.fullPage) return imageStream
         if (ImageUtil.isAnimatedAndSupported(imageStream)) {
             page.fullPage = true
@@ -367,13 +379,17 @@ class PagerPageHolder(
         }
         val imageBytes = imageStream.readBytes()
         val imageBitmap = try {
-            BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            ImageDecoder.newInstance(imageBytes.inputStream())?.decode()
         } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e) { "Cannot combine pages" }
+            null
+        }
+        if (imageBitmap == null) {
             imageStream2.close()
             imageStream.close()
             page.fullPage = true
             splitDoublePages()
-            logcat(LogPriority.ERROR, e) { "Cannot combine pages" }
+            logcat(LogPriority.ERROR) { "Cannot combine pages" }
             return imageBytes.inputStream()
         }
         viewer.scope.launchUI { progressIndicator.setProgress(96) }
@@ -390,14 +406,18 @@ class PagerPageHolder(
 
         val imageBytes2 = imageStream2.readBytes()
         val imageBitmap2 = try {
-            BitmapFactory.decodeByteArray(imageBytes2, 0, imageBytes2.size)
+            ImageDecoder.newInstance(imageBytes2.inputStream())?.decode()
         } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e) { "Cannot combine pages" }
+            null
+        }
+        if (imageBitmap2 == null) {
             imageStream2.close()
             imageStream.close()
             extraPage?.fullPage = true
             page.isolatedPage = true
             splitDoublePages()
-            logcat(LogPriority.ERROR, e) { "Cannot combine pages" }
+            logcat(LogPriority.ERROR) { "Cannot combine pages" }
             return imageBytes.inputStream()
         }
         viewer.scope.launchUI { progressIndicator.setProgress(97) }
@@ -416,7 +436,12 @@ class PagerPageHolder(
 
         imageStream.close()
         imageStream2.close()
-        return ImageUtil.mergeBitmaps(imageBitmap, imageBitmap2, isLTR, viewer.config.pageCanvasColor) {
+
+        val centerMargin = if (viewer.config.centerMarginType and PagerConfig.CenterMarginType.DOUBLE_PAGE_CENTER_MARGIN > 0 &&
+            !viewer.config.imageCropBorders
+        ) 96 / (max(1, getHeight()) / max(height, height2)) else 0
+
+        return ImageUtil.mergeBitmaps(imageBitmap, imageBitmap2, isLTR, centerMargin, viewer.config.pageCanvasColor) {
             viewer.scope.launchUI {
                 if (it == 100) {
                     progressIndicator.hide()
@@ -453,7 +478,11 @@ class PagerPageHolder(
             }
         }
 
-        return ImageUtil.splitInHalf(imageStream, side)
+        val sideMargin = if ((viewer.config.centerMarginType and PagerConfig.CenterMarginType.DOUBLE_PAGE_CENTER_MARGIN) > 0 &&
+            viewer.config.doublePages && !viewer.config.imageCropBorders
+        ) 48 else 0
+
+        return ImageUtil.splitInHalf(imageStream, side, sideMargin)
     }
 
     private fun onPageSplit(page: ReaderPage) {

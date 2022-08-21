@@ -7,6 +7,7 @@ import eu.kanade.domain.manga.model.isLocal
 import eu.kanade.domain.manga.model.toDbManga
 import eu.kanade.domain.manga.repository.MangaRepository
 import eu.kanade.tachiyomi.data.cache.CoverCache
+import eu.kanade.tachiyomi.data.download.DownloadManager
 import tachiyomi.source.model.MangaInfo
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -20,14 +21,25 @@ class UpdateManga(
         return mangaRepository.update(mangaUpdate)
     }
 
+    suspend fun awaitAll(values: List<MangaUpdate>): Boolean {
+        return mangaRepository.updateAll(values)
+    }
+
     suspend fun awaitUpdateFromSource(
         localManga: Manga,
         remoteManga: MangaInfo,
         manualFetch: Boolean,
         coverCache: CoverCache = Injekt.get(),
+        // SY -->
+        downloadManager: DownloadManager = Injekt.get(),
+        // SY <--
     ): Boolean {
-        // if the manga isn't a favorite, set its title from source and update in db
-        val title = if (!localManga.favorite) remoteManga.title else null
+        // SY -->
+        val title = if (remoteManga.title.isNotBlank() && localManga.ogTitle != remoteManga.title) {
+            downloadManager.renameMangaDir(localManga.ogTitle, remoteManga.title, localManga.source)
+            remoteManga.title
+        } else null
+        // SY <--
 
         // Never refresh covers if the url is empty to avoid "losing" existing covers
         val updateCover = remoteManga.cover.isNotEmpty() && (manualFetch || localManga.thumbnailUrl != remoteManga.cover)

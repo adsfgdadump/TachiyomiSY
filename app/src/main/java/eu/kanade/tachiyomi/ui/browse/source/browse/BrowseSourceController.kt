@@ -20,11 +20,11 @@ import com.google.android.material.snackbar.Snackbar
 import dev.chrisbanes.insetter.applyInsetter
 import eu.davidea.flexibleadapter.FlexibleAdapter
 import eu.davidea.flexibleadapter.items.IFlexible
-import eu.kanade.domain.category.model.toDbCategory
+import eu.kanade.domain.category.model.Category
+import eu.kanade.domain.manga.model.Manga
+import eu.kanade.domain.manga.model.toDbManga
 import eu.kanade.domain.source.model.Source
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.models.Category
-import eu.kanade.tachiyomi.data.database.models.Manga
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
 import eu.kanade.tachiyomi.databinding.SourceControllerBinding
 import eu.kanade.tachiyomi.source.CatalogueSource
@@ -50,8 +50,9 @@ import eu.kanade.tachiyomi.ui.webview.WebViewActivity
 import eu.kanade.tachiyomi.util.lang.launchIO
 import eu.kanade.tachiyomi.util.lang.launchUI
 import eu.kanade.tachiyomi.util.lang.withUIContext
-import eu.kanade.tachiyomi.util.preference.asImmediateFlow
+import eu.kanade.tachiyomi.util.preference.asHotFlow
 import eu.kanade.tachiyomi.util.system.connectivityManager
+import eu.kanade.tachiyomi.util.system.getParcelableCompat
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.util.view.inflate
@@ -217,6 +218,8 @@ open class BrowseSourceController(bundle: Bundle) :
             dialog.showDialog(router)
         }
         // SY <--
+
+        presenter.restartPager()
     }
 
     fun setSavedSearches(savedSearches: List<EXHSavedSearch>) {
@@ -374,7 +377,7 @@ open class BrowseSourceController(bundle: Bundle) :
             }
         } else {
             (binding.catalogueView.inflate(R.layout.source_recycler_autofit) as AutofitRecyclerView).apply {
-                numColumnsJob = getColumnsPreferenceForCurrentOrientation().asImmediateFlow { spanCount = it }
+                numColumnsJob = getColumnsPreferenceForCurrentOrientation().asHotFlow { spanCount = it }
                     .drop(1)
                     // Set again the adapter to recalculate the covers height
                     .onEach { adapter = this@BrowseSourceController.adapter }
@@ -522,11 +525,11 @@ open class BrowseSourceController(bundle: Bundle) :
      * @param genreName the name of the genre
      */
     fun searchWithGenre(genreName: String) {
-        presenter.sourceFilters = presenter.source.getFilterList()
+        val defaultFilters = presenter.source.getFilterList()
 
-        var filterList: FilterList? = null
+        var genreExists = false
 
-        filter@ for (sourceFilter in presenter.sourceFilters) {
+        filter@ for (sourceFilter in defaultFilters) {
             if (sourceFilter is Filter.Group<*>) {
                 for (filter in sourceFilter.state) {
                     if (filter is Filter<*> && filter.name.equals(genreName, true)) {
@@ -535,7 +538,7 @@ open class BrowseSourceController(bundle: Bundle) :
                             is Filter.CheckBox -> filter.state = true
                             else -> {}
                         }
-                        filterList = presenter.sourceFilters
+                        genreExists = true
                         break@filter
                     }
                 }
@@ -545,19 +548,20 @@ open class BrowseSourceController(bundle: Bundle) :
 
                 if (index != -1) {
                     sourceFilter.state = index
-                    filterList = presenter.sourceFilters
+                    genreExists = true
                     break
                 }
             }
         }
 
-        if (filterList != null) {
+        if (genreExists) {
+            presenter.sourceFilters = defaultFilters
             filterSheet?.setFilters(presenter.filterItems)
 
             showProgressBar()
 
             adapter?.clear()
-            presenter.restartPager("", filterList)
+            presenter.restartPager("", defaultFilters)
         } else {
             searchWithQuery(genreName)
         }
@@ -724,7 +728,7 @@ open class BrowseSourceController(bundle: Bundle) :
 
         adapter.allBoundViewHolders.forEach { holder ->
             val item = adapter.getItem(holder.bindingAdapterPosition) as? SourceItem
-            if (item != null && item.manga.id!! == manga.id!!) {
+            if (item != null && item.manga.id == manga.id) {
                 return holder as SourceHolder<*>
             }
         }
@@ -760,9 +764,9 @@ open class BrowseSourceController(bundle: Bundle) :
         val item = adapter?.getItem(position) as? SourceItem ?: return false
         router.pushController(
             MangaController(
-                item.manga.id!!,
+                item.manga.id,
                 true,
-                args.getParcelable(MangaController.SMART_SEARCH_CONFIG_EXTRA),
+                args.getParcelableCompat(MangaController.SMART_SEARCH_CONFIG_EXTRA),
             ),
         )
         return false
@@ -790,7 +794,7 @@ open class BrowseSourceController(bundle: Bundle) :
                         .setItems(arrayOf(activity.getString(R.string.remove_from_library))) { _, which ->
                             when (which) {
                                 0 -> {
-                                    presenter.changeMangaFavorite(manga)
+                                    presenter.changeMangaFavorite(manga.toDbManga())
                                     adapter?.notifyItemChanged(position)
                                     activity.toast(activity.getString(R.string.manga_removed_library))
                                 }
@@ -825,18 +829,18 @@ open class BrowseSourceController(bundle: Bundle) :
                 when {
                     // Default category set
                     defaultCategory != null -> {
-                        presenter.moveMangaToCategory(newManga, defaultCategory.toDbCategory())
+                        presenter.moveMangaToCategory(newManga.toDbManga(), defaultCategory)
 
-                        presenter.changeMangaFavorite(newManga)
+                        presenter.changeMangaFavorite(newManga.toDbManga())
                         adapter?.notifyItemChanged(position)
                         activity.toast(activity.getString(R.string.manga_added_library))
                     }
 
                     // Automatic 'Default' or no categories
                     defaultCategoryId == 0 || categories.isEmpty() -> {
-                        presenter.moveMangaToCategory(newManga, null)
+                        presenter.moveMangaToCategory(newManga.toDbManga(), null)
 
-                        presenter.changeMangaFavorite(newManga)
+                        presenter.changeMangaFavorite(newManga.toDbManga())
                         adapter?.notifyItemChanged(position)
                         activity.toast(activity.getString(R.string.manga_added_library))
                     }
@@ -852,7 +856,7 @@ open class BrowseSourceController(bundle: Bundle) :
                             }
                         }.toTypedArray()
 
-                        ChangeMangaCategoriesDialog(this@BrowseSourceController, listOf(newManga), categories.map { it.toDbCategory() }, preselected)
+                        ChangeMangaCategoriesDialog(this@BrowseSourceController, listOf(newManga), categories, preselected)
                             .showDialog(router)
                     }
                 }
@@ -869,8 +873,8 @@ open class BrowseSourceController(bundle: Bundle) :
     override fun updateCategoriesForMangas(mangas: List<Manga>, addCategories: List<Category>, removeCategories: List<Category>) {
         val manga = mangas.firstOrNull() ?: return
 
-        presenter.changeMangaFavorite(manga)
-        presenter.updateMangaCategories(manga, addCategories)
+        presenter.changeMangaFavorite(manga.toDbManga())
+        presenter.updateMangaCategories(manga.toDbManga(), addCategories)
 
         val position = adapter?.currentItems?.indexOfFirst { it -> (it as SourceItem).manga.id == manga.id }
         if (position != null) {

@@ -29,8 +29,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import eu.kanade.presentation.components.ChapterDownloadAction
 import eu.kanade.presentation.components.ChapterDownloadIndicator
-import eu.kanade.presentation.manga.ChapterDownloadAction
+import eu.kanade.presentation.util.ReadItemAlpha
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.download.model.Download
 
@@ -44,8 +45,8 @@ fun MangaChapterListItem(
     read: Boolean,
     bookmark: Boolean,
     selected: Boolean,
-    downloadState: Download.State,
-    downloadProgress: Int,
+    downloadStateProvider: () -> Download.State,
+    downloadProgressProvider: () -> Int,
     onLongClick: () -> Unit,
     onClick: () -> Unit,
     onDownloadClick: ((ChapterDownloadAction) -> Unit)?,
@@ -59,16 +60,14 @@ fun MangaChapterListItem(
             )
             .padding(start = 16.dp, top = 12.dp, end = 8.dp, bottom = 12.dp),
     ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .alpha(if (read) ReadItemAlpha else 1f),
-        ) {
-            val textColor = if (bookmark) {
+        Column(modifier = Modifier.weight(1f)) {
+            val textColor = if (bookmark && !read) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.onSurface
             }
+            val textAlpha = remember(read) { if (read) ReadItemAlpha else 1f }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 var textHeight by remember { mutableStateOf(0) }
                 if (bookmark) {
@@ -77,21 +76,22 @@ fun MangaChapterListItem(
                         contentDescription = stringResource(R.string.action_filter_bookmarked),
                         modifier = Modifier
                             .sizeIn(maxHeight = with(LocalDensity.current) { textHeight.toDp() - 2.dp }),
-                        tint = textColor,
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                     Spacer(modifier = Modifier.width(2.dp))
                 }
                 Text(
                     text = title,
-                    style = MaterialTheme.typography.bodyMedium
-                        .copy(color = textColor),
+                    color = textColor,
+                    style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     onTextLayout = { textHeight = it.size.height },
+                    modifier = Modifier.alpha(textAlpha),
                 )
             }
             Spacer(modifier = Modifier.height(6.dp))
-            Row {
+            Row(modifier = Modifier.alpha(textAlpha)) {
                 ProvideTextStyle(
                     value = MaterialTheme.typography.bodyMedium
                         .copy(color = textColor, fontSize = 12.sp),
@@ -128,12 +128,10 @@ fun MangaChapterListItem(
         if (onDownloadClick != null) {
             ChapterDownloadIndicator(
                 modifier = Modifier.padding(start = 4.dp),
-                downloadState = downloadState,
-                downloadProgress = downloadProgress,
+                downloadStateProvider = downloadStateProvider,
+                downloadProgressProvider = downloadProgressProvider,
                 onClick = onDownloadClick,
             )
         }
     }
 }
-
-private const val ReadItemAlpha = .38f

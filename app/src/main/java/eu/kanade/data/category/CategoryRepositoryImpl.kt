@@ -1,49 +1,75 @@
 package eu.kanade.data.category
 
 import eu.kanade.data.DatabaseHandler
-import eu.kanade.data.listOfLongsAdapter
 import eu.kanade.domain.category.model.Category
 import eu.kanade.domain.category.model.CategoryUpdate
 import eu.kanade.domain.category.repository.CategoryRepository
-import eu.kanade.domain.category.repository.DuplicateNameException
+import eu.kanade.tachiyomi.Database
 import kotlinx.coroutines.flow.Flow
 
 class CategoryRepositoryImpl(
     private val handler: DatabaseHandler,
 ) : CategoryRepository {
 
-    override fun getAll(): Flow<List<Category>> {
+    override suspend fun getAll(): List<Category> {
+        return handler.awaitList { categoriesQueries.getCategories(categoryMapper) }
+    }
+
+    override fun getAllAsFlow(): Flow<List<Category>> {
         return handler.subscribeToList { categoriesQueries.getCategories(categoryMapper) }
     }
 
-    @Throws(DuplicateNameException::class)
-    override suspend fun insert(name: String, order: Long) {
-        if (checkDuplicateName(name)) throw DuplicateNameException(name)
-        handler.await {
-            categoriesQueries.insert(
-                name = name,
-                order = order,
-                flags = 0L,
-                // SY -->
-                mangaOrder = emptyList(),
-                // SY <--
-            )
+    override suspend fun getCategoriesByMangaId(mangaId: Long): List<Category> {
+        return handler.awaitList {
+            categoriesQueries.getCategoriesByMangaId(mangaId, categoryMapper)
         }
     }
 
-    @Throws(DuplicateNameException::class)
-    override suspend fun update(payload: CategoryUpdate) {
-        if (payload.name != null && checkDuplicateName(payload.name)) throw DuplicateNameException(payload.name)
-        handler.await {
-            categoriesQueries.update(
-                name = payload.name,
-                order = payload.order,
-                flags = payload.flags,
-                categoryId = payload.id,
-                // SY -->
-                mangaOrder = payload.mangaOrder?.let(listOfLongsAdapter::encode),
-                // SY <--
+    override fun getCategoriesByMangaIdAsFlow(mangaId: Long): Flow<List<Category>> {
+        return handler.subscribeToList {
+            categoriesQueries.getCategoriesByMangaId(mangaId, categoryMapper)
+        }
+    }
+
+    // SY -->
+    override suspend fun insert(category: Category): Long {
+        return handler.awaitOne(true) {
+            categoriesQueries.insert(
+                name = category.name,
+                order = category.order,
+                flags = category.flags,
             )
+            categoriesQueries.selectLastInsertedRowId()
+        }
+    }
+    // SY <--
+
+    override suspend fun updatePartial(update: CategoryUpdate) {
+        handler.await {
+            updatePartialBlocking(update)
+        }
+    }
+
+    override suspend fun updatePartial(updates: List<CategoryUpdate>) {
+        handler.await(true) {
+            for (update in updates) {
+                updatePartialBlocking(update)
+            }
+        }
+    }
+
+    private fun Database.updatePartialBlocking(update: CategoryUpdate) {
+        categoriesQueries.update(
+            name = update.name,
+            order = update.order,
+            flags = update.flags,
+            categoryId = update.id,
+        )
+    }
+
+    override suspend fun updateAllFlags(flags: Long?) {
+        handler.await {
+            categoriesQueries.updateAllFlags(flags)
         }
     }
 
@@ -53,17 +79,5 @@ class CategoryRepositoryImpl(
                 categoryId = categoryId,
             )
         }
-    }
-
-    override suspend fun getCategoriesForManga(mangaId: Long): List<Category> {
-        return handler.awaitList {
-            categoriesQueries.getCategoriesByMangaId(mangaId, categoryMapper)
-        }
-    }
-
-    override suspend fun checkDuplicateName(name: String): Boolean {
-        return handler
-            .awaitList { categoriesQueries.getCategories() }
-            .any { it.name == name }
     }
 }

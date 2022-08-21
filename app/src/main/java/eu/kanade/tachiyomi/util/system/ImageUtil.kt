@@ -1,5 +1,4 @@
 package eu.kanade.tachiyomi.util.system
-
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Bitmap
@@ -12,6 +11,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
+import android.webkit.MimeTypeMap
 import androidx.annotation.ColorInt
 import androidx.core.graphics.alpha
 import androidx.core.graphics.applyCanvas
@@ -65,6 +65,12 @@ object ImageUtil {
         } catch (e: Exception) {
         }
         return null
+    }
+
+    fun getExtensionFromMimeType(mime: String?): String {
+        return MimeTypeMap.getSingleton().getExtensionFromMimeType(mime)
+            ?: SUPPLEMENTARY_MIMETYPE_MAPPING[mime]
+            ?: "jpg"
     }
 
     fun isAnimatedAndSupported(stream: InputStream): Boolean {
@@ -121,16 +127,16 @@ object ImageUtil {
     /**
      * Extract the 'side' part from imageStream and return it as InputStream.
      */
-    fun splitInHalf(imageStream: InputStream, side: Side): InputStream {
+    fun splitInHalf(imageStream: InputStream, side: Side, sidePadding: Int): InputStream {
         val imageBytes = imageStream.readBytes()
 
         val imageBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
         val height = imageBitmap.height
         val width = imageBitmap.width
 
-        val singlePage = Rect(0, 0, width / 2, height)
+        val singlePage = Rect(0, 0, width / 2 + sidePadding, height)
 
-        val half = createBitmap(width / 2, height)
+        val half = createBitmap(width / 2 + sidePadding, height)
         val part = when (side) {
             Side.RIGHT -> Rect(width - width / 2, 0, width, height)
             Side.LEFT -> Rect(0, 0, width / 2, height)
@@ -145,7 +151,8 @@ object ImageUtil {
     }
 
     /**
-     * Split the image into left and right parts, then merge them into a new image.
+     * Split the image into left and right parts, then merge them into a
+     * new vertically-aligned image.
      */
     fun splitAndMerge(imageStream: InputStream, upperSide: Side): InputStream {
         val imageBytes = imageStream.readBytes()
@@ -180,6 +187,40 @@ object ImageUtil {
     enum class Side {
         RIGHT, LEFT
     }
+    // SY -->
+    /**
+     * Split the image into left and right parts, then merge them into a
+     * new image with added center padding scaled relative to the height of the display view
+     * to compensate for scaling.
+     */
+
+    fun AddHorizontalCenterMargin(imageStream: InputStream, viewHeight: Int, backgroundContext: Context): InputStream {
+        val imageBitmap = ImageDecoder.newInstance(imageStream)?.decode()!!
+        val height = imageBitmap.height
+        val width = imageBitmap.width
+
+        val centerPadding = 96 / (max(1, viewHeight) / height)
+
+        val leftSourcePart = Rect(0, 0, width / 2, height)
+        val rightSourcePart = Rect(width / 2, 0, width, height)
+        val leftTargetPart = Rect(0, 0, width / 2, height)
+        val rightTargetPart = Rect(width / 2 + centerPadding, 0, width + centerPadding, height)
+
+        val bgColor = chooseBackground(backgroundContext, imageStream)
+        bgColor.setBounds(width / 2, 0, width / 2 + centerPadding, height)
+        val result = createBitmap(width + centerPadding, height)
+
+        result.applyCanvas {
+            drawBitmap(imageBitmap, leftSourcePart, leftTargetPart, null)
+            drawBitmap(imageBitmap, rightSourcePart, rightTargetPart, null)
+            bgColor.draw(this)
+        }
+
+        val output = ByteArrayOutputStream()
+        result.compress(Bitmap.CompressFormat.JPEG, 100, output)
+        return ByteArrayInputStream(output.toByteArray())
+    }
+    // SY <--
 
     /**
      * Check whether the image is considered a tall image.
@@ -187,7 +228,7 @@ object ImageUtil {
      * @return true if the height:width ratio is greater than 3.
      */
     private fun isTallImage(imageStream: InputStream): Boolean {
-        val options = extractImageOptions(imageStream, false)
+        val options = extractImageOptions(imageStream, resetAfterExtraction = false)
         return (options.outHeight / options.outWidth) > 3
     }
 
@@ -199,16 +240,34 @@ object ImageUtil {
             return true
         }
 
-        val options = extractImageOptions(imageFile.openInputStream(), false).apply { inJustDecodeBounds = false }
+        val options = extractImageOptions(imageFile.openInputStream(), resetAfterExtraction = false).apply { inJustDecodeBounds = false }
         // Values are stored as they get modified during split loop
         val imageHeight = options.outHeight
         val imageWidth = options.outWidth
 
-        val splitHeight = getDisplayMaxHeightInPx
+        val splitHeight = (getDisplayMaxHeightInPx * 1.5).toInt()
         // -1 so it doesn't try to split when imageHeight = getDisplayHeightInPx
-        val partCount = (imageHeight - 1) / getDisplayMaxHeightInPx + 1
+        val partCount = (imageHeight - 1) / splitHeight + 1
 
-        logcat { "Splitting ${imageHeight}px height image into $partCount part with estimated ${splitHeight}px per height" }
+        val optimalSplitHeight = imageHeight / partCount
+
+        val splitDataList = (0 until partCount).fold(mutableListOf<SplitData>()) { list, index ->
+            list.apply {
+                // Only continue if the list is empty or there is image remaining
+                if (isEmpty() || imageHeight > last().bottomOffset) {
+                    val topOffset = index * optimalSplitHeight
+                    var outputImageHeight = min(optimalSplitHeight, imageHeight - topOffset)
+
+                    val remainingHeight = imageHeight - (topOffset + outputImageHeight)
+                    // If remaining height is smaller or equal to 1/3th of
+                    // optimal split height then include it in current page
+                    if (remainingHeight <= (optimalSplitHeight / 3)) {
+                        outputImageHeight += remainingHeight
+                    }
+                    add(SplitData(index, topOffset, outputImageHeight))
+                }
+            }
+        }
 
         val bitmapRegionDecoder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             BitmapRegionDecoder.newInstance(imageFile.openInputStream())
@@ -222,34 +281,50 @@ object ImageUtil {
             return false
         }
 
-        try {
-            (0 until partCount).forEach { splitIndex ->
-                val splitPath = imageFilePath.substringBeforeLast(".") + "__${"%03d".format(splitIndex + 1)}.jpg"
+        logcat {
+            "Splitting image with height of $imageHeight into $partCount part " +
+                "with estimated ${optimalSplitHeight}px height per split"
+        }
 
-                val topOffset = splitIndex * splitHeight
-                val outputImageHeight = min(splitHeight, imageHeight - topOffset)
-                val bottomOffset = topOffset + outputImageHeight
-                logcat { "Split #$splitIndex with topOffset=$topOffset height=$outputImageHeight bottomOffset=$bottomOffset" }
+        return try {
+            splitDataList.forEach { splitData ->
+                val splitPath = splitImagePath(imageFilePath, splitData.index)
 
-                val region = Rect(0, topOffset, imageWidth, bottomOffset)
+                val region = Rect(0, splitData.topOffset, imageWidth, splitData.bottomOffset)
 
                 FileOutputStream(splitPath).use { outputStream ->
                     val splitBitmap = bitmapRegionDecoder.decodeRegion(region, options)
                     splitBitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+                    splitBitmap.recycle()
+                }
+                logcat {
+                    "Success: Split #${splitData.index + 1} with topOffset=${splitData.topOffset} " +
+                        "height=${splitData.outputImageHeight} bottomOffset=${splitData.bottomOffset}"
                 }
             }
             imageFile.delete()
-            return true
+            true
         } catch (e: Exception) {
             // Image splits were not successfully saved so delete them and keep the original image
-            (0 until partCount)
-                .map { imageFilePath.substringBeforeLast(".") + "__${"%03d".format(it + 1)}.jpg" }
+            splitDataList
+                .map { splitImagePath(imageFilePath, it.index) }
                 .forEach { File(it).delete() }
             logcat(LogPriority.ERROR, e)
-            return false
+            false
         } finally {
             bitmapRegionDecoder.recycle()
         }
+    }
+
+    private fun splitImagePath(imageFilePath: String, index: Int) =
+        imageFilePath.substringBeforeLast(".") + "__${"%03d".format(index + 1)}.jpg"
+
+    data class SplitData(
+        val index: Int,
+        val topOffset: Int,
+        val outputImageHeight: Int,
+    ) {
+        val bottomOffset = topOffset + outputImageHeight
     }
 
     /**
@@ -483,10 +558,17 @@ object ImageUtil {
         return options
     }
 
+    // Android doesn't include some mappings
+    private val SUPPLEMENTARY_MIMETYPE_MAPPING = mapOf(
+        // https://issuetracker.google.com/issues/182703810
+        "image/jxl" to "jxl",
+    )
+
     fun mergeBitmaps(
         imageBitmap: Bitmap,
         imageBitmap2: Bitmap,
         isLTR: Boolean,
+        centerMargin: Int,
         @ColorInt background: Int = Color.WHITE,
         progressCallback: ((Int) -> Unit)? = null,
     ): ByteArrayInputStream {
@@ -494,24 +576,28 @@ object ImageUtil {
         val width = imageBitmap.width
         val height2 = imageBitmap2.height
         val width2 = imageBitmap2.width
+
         val maxHeight = max(height, height2)
-        val result = Bitmap.createBitmap(width + width2, max(height, height2), Bitmap.Config.ARGB_8888)
+
+        val result = Bitmap.createBitmap(width + width2 + centerMargin, max(height, height2), Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
         canvas.drawColor(background)
         val upperPart = Rect(
-            if (isLTR) 0 else width2,
+            if (isLTR) 0 else width2 + centerMargin,
             (maxHeight - imageBitmap.height) / 2,
-            (if (isLTR) 0 else width2) + imageBitmap.width,
+            (if (isLTR) 0 else width2 + centerMargin) + imageBitmap.width,
             imageBitmap.height + (maxHeight - imageBitmap.height) / 2,
         )
+
         canvas.drawBitmap(imageBitmap, imageBitmap.rect, upperPart, null)
         progressCallback?.invoke(98)
         val bottomPart = Rect(
-            if (!isLTR) 0 else width,
+            if (!isLTR) 0 else width + centerMargin,
             (maxHeight - imageBitmap2.height) / 2,
-            (if (!isLTR) 0 else width) + imageBitmap2.width,
+            (if (!isLTR) 0 else width + centerMargin) + imageBitmap2.width,
             imageBitmap2.height + (maxHeight - imageBitmap2.height) / 2,
         )
+
         canvas.drawBitmap(imageBitmap2, imageBitmap2.rect, bottomPart, null)
         progressCallback?.invoke(99)
 

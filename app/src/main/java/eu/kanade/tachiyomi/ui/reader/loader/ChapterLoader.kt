@@ -1,8 +1,9 @@
 package eu.kanade.tachiyomi.ui.reader.loader
 
 import android.content.Context
+import com.github.junrar.exception.UnsupportedRarV5Exception
+import eu.kanade.domain.manga.model.Manga
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.models.Manga
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.LocalSource
 import eu.kanade.tachiyomi.source.Source
@@ -87,14 +88,15 @@ class ChapterLoader(
      * Returns the page loader to use for this [chapter].
      */
     private fun getPageLoader(chapter: ReaderChapter): PageLoader {
-        val isDownloaded = downloadManager.isChapterDownloaded(chapter.chapter, manga, true)
+        val dbChapter = chapter.chapter
+        val isDownloaded = downloadManager.isChapterDownloaded(dbChapter.name, dbChapter.scanlator, /* SY --> */ manga.ogTitle /* SY <-- */, manga.source, skipCache = true)
         return when {
             // SY -->
             source is MergedSource -> {
                 val mangaReference = mergedReferences.firstOrNull { it.mangaId == chapter.chapter.manga_id } ?: error("Merge reference null")
                 val source = sourceManager.get(mangaReference.mangaSourceId) ?: error("Source ${mangaReference.mangaSourceId} was null")
                 val manga = mergedManga[chapter.chapter.manga_id] ?: error("Manga for merged chapter was null")
-                val isMergedMangaDownloaded = downloadManager.isChapterDownloaded(chapter.chapter, manga, true)
+                val isMergedMangaDownloaded = downloadManager.isChapterDownloaded(chapter.chapter.name, chapter.chapter.scanlator, manga.ogTitle, manga.source, true)
                 when {
                     isMergedMangaDownloaded -> DownloadPageLoader(chapter, manga, source, downloadManager)
                     source is HttpSource -> HttpPageLoader(chapter, source)
@@ -116,7 +118,11 @@ class ChapterLoader(
                 when (format) {
                     is LocalSource.Format.Directory -> DirectoryPageLoader(format.file)
                     is LocalSource.Format.Zip -> ZipPageLoader(format.file)
-                    is LocalSource.Format.Rar -> RarPageLoader(format.file)
+                    is LocalSource.Format.Rar -> try {
+                        RarPageLoader(format.file)
+                    } catch (e: UnsupportedRarV5Exception) {
+                        error(context.getString(R.string.loader_rar5_error))
+                    }
                     is LocalSource.Format.Epub -> EpubPageLoader(format.file)
                 }
             }

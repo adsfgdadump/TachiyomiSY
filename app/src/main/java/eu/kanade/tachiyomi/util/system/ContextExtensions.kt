@@ -69,7 +69,7 @@ fun Context.toast(@StringRes resource: Int, duration: Int = Toast.LENGTH_SHORT, 
  * @param duration the duration of the toast. Defaults to short.
  */
 fun Context.toast(text: String?, duration: Int = Toast.LENGTH_SHORT, block: (Toast) -> Unit = {}): Toast {
-    return Toast.makeText(this, text.orEmpty(), duration).also {
+    return Toast.makeText(applicationContext, text.orEmpty(), duration).also {
         block(it)
         it.show()
     }
@@ -319,8 +319,8 @@ fun Context.isNightMode(): Boolean {
  * https://cs.android.com/androidx/platform/frameworks/support/+/androidx-main:appcompat/appcompat/src/main/java/androidx/appcompat/app/AppCompatDelegateImpl.java;l=348;drc=e28752c96fc3fb4d3354781469a1af3dbded4898
  */
 fun Context.createReaderThemeContext(): Context {
-    val prefs = Injekt.get<PreferencesHelper>()
-    val isDarkBackground = when (prefs.readerTheme().get()) {
+    val preferences = Injekt.get<PreferencesHelper>()
+    val isDarkBackground = when (preferences.readerTheme().get()) {
         1, 2 -> true // Black, Gray
         3 -> applicationContext.isNightMode() // Automatic bg uses activity background by default
         else -> false // White
@@ -333,7 +333,7 @@ fun Context.createReaderThemeContext(): Context {
 
         val wrappedContext = ContextThemeWrapper(this, R.style.Theme_Tachiyomi)
         wrappedContext.applyOverrideConfiguration(overrideConf)
-        ThemingDelegate.getThemeResIds(prefs.appTheme().get(), prefs.themeDarkAmoled().get())
+        ThemingDelegate.getThemeResIds(preferences.appTheme().get(), preferences.themeDarkAmoled().get())
             .forEach { wrappedContext.theme.applyStyle(it, true) }
         return wrappedContext
     }

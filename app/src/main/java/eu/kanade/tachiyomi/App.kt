@@ -16,6 +16,7 @@ import android.webkit.WebView
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.getSystemService
+import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -38,19 +39,23 @@ import com.google.firebase.analytics.ktx.analytics
 import com.google.firebase.ktx.Firebase
 import com.ms_square.debugoverlay.DebugOverlay
 import com.ms_square.debugoverlay.modules.FpsModule
+import eu.kanade.data.DatabaseHandler
 import eu.kanade.domain.DomainModule
 import eu.kanade.domain.SYDomainModule
 import eu.kanade.tachiyomi.data.coil.DomainMangaKeyer
 import eu.kanade.tachiyomi.data.coil.MangaCoverFetcher
 import eu.kanade.tachiyomi.data.coil.MangaCoverKeyer
 import eu.kanade.tachiyomi.data.coil.MangaKeyer
+import eu.kanade.tachiyomi.data.coil.PagePreviewFetcher
+import eu.kanade.tachiyomi.data.coil.PagePreviewKeyer
 import eu.kanade.tachiyomi.data.coil.TachiyomiImageDecoder
 import eu.kanade.tachiyomi.data.notification.Notifications
 import eu.kanade.tachiyomi.data.preference.PreferenceValues
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
+import eu.kanade.tachiyomi.glance.UpdatesGridGlanceWidget
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.ui.base.delegate.SecureActivityDelegate
-import eu.kanade.tachiyomi.util.preference.asImmediateFlow
+import eu.kanade.tachiyomi.util.preference.asHotFlow
 import eu.kanade.tachiyomi.util.system.AuthenticatorUtil
 import eu.kanade.tachiyomi.util.system.WebViewUtil
 import eu.kanade.tachiyomi.util.system.animatorDurationScale
@@ -65,6 +70,8 @@ import exh.log.XLogLogcatLogger
 import exh.log.xLogD
 import exh.log.xLogE
 import exh.syDebugVersion
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import logcat.LogPriority
@@ -76,6 +83,7 @@ import uy.kohesive.injekt.injectLazy
 import java.io.File
 import java.security.Security
 import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 import kotlin.time.Duration.Companion.days
 
@@ -146,7 +154,7 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
             .launchIn(ProcessLifecycleOwner.get().lifecycleScope)
 
         preferences.themeMode()
-            .asImmediateFlow {
+            .asHotFlow {
                 AppCompatDelegate.setDefaultNightMode(
                     when (it) {
                         PreferenceValues.ThemeMode.light -> AppCompatDelegate.MODE_NIGHT_NO
@@ -155,6 +163,19 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
                     },
                 )
             }.launchIn(ProcessLifecycleOwner.get().lifecycleScope)
+
+        // Updates widget update
+        Injekt.get<DatabaseHandler>()
+            .subscribeToList { updatesViewQueries.updates(after = UpdatesGridGlanceWidget.DateLimit.timeInMillis) }
+            .drop(1)
+            .distinctUntilChanged()
+            .onEach {
+                val manager = GlanceAppWidgetManager(this)
+                if (manager.getGlanceIds(UpdatesGridGlanceWidget::class.java).isNotEmpty()) {
+                    UpdatesGridGlanceWidget().loadData(it)
+                }
+            }
+            .launchIn(ProcessLifecycleOwner.get().lifecycleScope)
 
         /*if (!LogcatLogger.isInstalled && preferences.verboseLogging()) {
             LogcatLogger.install(AndroidLogcatLogger(LogPriority.VERBOSE))
@@ -178,6 +199,10 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
                 add(MangaKeyer())
                 add(DomainMangaKeyer())
                 add(MangaCoverKeyer())
+                // SY -->
+                add(PagePreviewKeyer())
+                add(PagePreviewFetcher.Factory(lazy(callFactoryInit), lazy(diskCacheInit)))
+                // SY <--
             }
             callFactory(callFactoryInit)
             diskCache(diskCacheInit)
@@ -194,6 +219,7 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
     }
 
     override fun onStop(owner: LifecycleOwner) {
+        preferences.lastAppClosed().set(Date().time)
         if (!AuthenticatorUtil.isAuthenticating && preferences.lockAppAfter().get() >= 0) {
             SecureActivityDelegate.locked = true
         }
@@ -220,7 +246,7 @@ class App : Application(), DefaultLifecycleObserver, ImageLoaderFactory {
         return super.getPackageName()
     }
 
-    protected open fun setupNotificationChannels() {
+    private fun setupNotificationChannels() {
         try {
             Notifications.createChannels(this)
         } catch (e: Exception) {

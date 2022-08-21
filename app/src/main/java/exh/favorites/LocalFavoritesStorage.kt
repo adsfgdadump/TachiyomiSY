@@ -1,56 +1,71 @@
 package exh.favorites
 
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
-import eu.kanade.tachiyomi.data.database.models.Manga
+import eu.kanade.domain.category.interactor.GetCategories
+import eu.kanade.domain.category.model.Category
+import eu.kanade.domain.manga.interactor.DeleteFavoriteEntries
+import eu.kanade.domain.manga.interactor.GetFavoriteEntries
+import eu.kanade.domain.manga.interactor.GetFavorites
+import eu.kanade.domain.manga.interactor.InsertFavoriteEntries
+import eu.kanade.domain.manga.model.Manga
+import eu.kanade.tachiyomi.data.database.models.toDomainManga
 import eu.kanade.tachiyomi.source.online.all.EHentai
 import exh.favorites.sql.models.FavoriteEntry
 import exh.metadata.metadata.EHentaiSearchMetadata
 import exh.source.isEhBasedManga
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.asFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.toList
 import uy.kohesive.injekt.injectLazy
 
 class LocalFavoritesStorage {
-    private val db: DatabaseHelper by injectLazy()
+    private val getFavorites: GetFavorites by injectLazy()
+    private val getCategories: GetCategories by injectLazy()
+    private val deleteFavoriteEntries: DeleteFavoriteEntries by injectLazy()
+    private val getFavoriteEntries: GetFavoriteEntries by injectLazy()
+    private val insertFavoriteEntries: InsertFavoriteEntries by injectLazy()
 
-    fun getChangedDbEntries() = db.getFavoriteMangas()
-        .executeAsBlocking()
-        .asSequence()
+    suspend fun getChangedDbEntries() = getFavorites.await()
+        .asFlow()
         .loadDbCategories()
         .parseToFavoriteEntries()
         .getChangedEntries()
 
-    fun getChangedRemoteEntries(entries: List<EHentai.ParsedManga>) = entries
-        .asSequence()
+    suspend fun getChangedRemoteEntries(entries: List<EHentai.ParsedManga>) = entries
+        .asFlow()
         .map {
             it.fav to it.manga.apply {
+                id = -1
                 favorite = true
                 date_added = System.currentTimeMillis()
-            }
+            }.toDomainManga()!!
         }
         .parseToFavoriteEntries()
         .getChangedEntries()
 
-    fun snapshotEntries() {
-        val dbMangas = db.getFavoriteMangas()
-            .executeAsBlocking()
-            .asSequence()
+    suspend fun snapshotEntries() {
+        val dbMangas = getFavorites.await()
+            .asFlow()
             .loadDbCategories()
             .parseToFavoriteEntries()
 
         // Delete old snapshot
-        db.deleteAllFavoriteEntries().executeAsBlocking()
+        deleteFavoriteEntries.await()
 
         // Insert new snapshots
-        db.insertFavoriteEntries(dbMangas.toList()).executeAsBlocking()
+        insertFavoriteEntries.await(dbMangas.toList())
     }
 
-    fun clearSnapshots() {
-        db.deleteAllFavoriteEntries().executeAsBlocking()
+    suspend fun clearSnapshots() {
+        deleteFavoriteEntries.await()
     }
 
-    private fun Sequence<FavoriteEntry>.getChangedEntries(): ChangeSet {
+    private suspend fun Flow<FavoriteEntry>.getChangedEntries(): ChangeSet {
         val terminated = toList()
 
-        val databaseEntries = db.getFavoriteEntries().executeAsBlocking()
+        val databaseEntries = getFavoriteEntries.await()
 
         val added = terminated.filter {
             queryListForEntry(databaseEntries, it) == null
@@ -74,11 +89,12 @@ class LocalFavoritesStorage {
                 it.category == entry.category
         }
 
-    private fun Sequence<Manga>.loadDbCategories(): Sequence<Pair<Int, Manga>> {
-        val dbCategories = db.getCategories().executeAsBlocking()
+    private suspend fun Flow<Manga>.loadDbCategories(): Flow<Pair<Int, Manga>> {
+        val dbCategories = getCategories.await()
+            .filterNot(Category::isSystemCategory)
 
         return filter(::validateDbManga).mapNotNull {
-            val category = db.getCategoriesForManga(it).executeAsBlocking()
+            val category = getCategories.await(it.id)
 
             dbCategories.indexOf(
                 category.firstOrNull()
@@ -87,12 +103,12 @@ class LocalFavoritesStorage {
         }
     }
 
-    private fun Sequence<Pair<Int, Manga>>.parseToFavoriteEntries() =
+    private fun Flow<Pair<Int, Manga>>.parseToFavoriteEntries() =
         filter { (_, manga) ->
             validateDbManga(manga)
         }.mapNotNull { (categoryId, manga) ->
             FavoriteEntry(
-                title = manga.originalTitle,
+                title = manga.ogTitle,
                 gid = EHentaiSearchMetadata.galleryId(manga.url),
                 token = EHentaiSearchMetadata.galleryToken(manga.url),
                 category = categoryId,

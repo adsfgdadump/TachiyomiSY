@@ -14,10 +14,13 @@ import androidx.core.net.toUri
 import androidx.core.text.HtmlCompat
 import androidx.preference.PreferenceScreen
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
+import eu.kanade.domain.chapter.interactor.GetChapterByMangaId
+import eu.kanade.domain.chapter.model.toDbChapter
+import eu.kanade.domain.manga.interactor.GetAllManga
 import eu.kanade.domain.manga.repository.MangaRepository
 import eu.kanade.tachiyomi.R
 import eu.kanade.tachiyomi.data.cache.ChapterCache
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
+import eu.kanade.tachiyomi.data.cache.PagePreviewCache
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.data.library.LibraryUpdateService
 import eu.kanade.tachiyomi.data.library.LibraryUpdateService.Target
@@ -82,7 +85,9 @@ class SettingsAdvancedController(
     private val network: NetworkHelper by injectLazy()
     private val chapterCache: ChapterCache by injectLazy()
     private val trackManager: TrackManager by injectLazy()
-    private val db: DatabaseHelper by injectLazy()
+    private val getAllManga: GetAllManga by injectLazy()
+    private val getChapterByMangaId: GetChapterByMangaId by injectLazy()
+    private val pagePreviewCache: PagePreviewCache by injectLazy()
 
     @SuppressLint("BatteryLife")
     override fun setupPreferenceScreen(screen: PreferenceScreen) = screen.apply {
@@ -157,6 +162,15 @@ class SettingsAdvancedController(
 
                 onClick { clearChapterCache() }
             }
+            // SY -->
+            preference {
+                key = CLEAR_PREVIEW_CACHE_KEY
+                titleRes = R.string.pref_clear_page_preview_cache
+                summary = context.getString(R.string.used_cache, pagePreviewCache.readableSize)
+
+                onClick { clearPagePreviewCache() }
+            }
+            // SY <--
             switchPreference {
                 key = Keys.autoClearChapterCache
                 titleRes = R.string.pref_auto_clear_chapter_cache
@@ -222,6 +236,28 @@ class SettingsAdvancedController(
                 onChange {
                     activity?.toast(R.string.requires_app_restart)
                     true
+                }
+            }
+            editTextPreference {
+                key = Keys.defaultUserAgent
+                titleRes = R.string.pref_user_agent_string
+                text = preferences.defaultUserAgent().get()
+                summary = network.defaultUserAgent
+
+                onChange {
+                    activity?.toast(R.string.requires_app_restart)
+                    true
+                }
+            }
+            if (preferences.defaultUserAgent().isSet()) {
+                preference {
+                    key = "pref_reset_user_agent"
+                    titleRes = R.string.pref_reset_user_agent_string
+
+                    onClick {
+                        preferences.defaultUserAgent().delete()
+                        activity?.toast(R.string.requires_app_restart)
+                    }
                 }
             }
         }
@@ -475,7 +511,7 @@ class SettingsAdvancedController(
         if (job?.isActive == true) return
         activity?.toast(R.string.starting_cleanup)
         job = launchIO {
-            val mangaList = db.getMangas().executeAsBlocking()
+            val mangaList = getAllManga.await()
             val downloadManager: DownloadManager = Injekt.get()
             var foldersCleared = 0
             Injekt.get<SourceManager>().getOnlineSources().forEach { source ->
@@ -483,7 +519,7 @@ class SettingsAdvancedController(
                 val sourceManga = mangaList
                     .asSequence()
                     .filter { it.source == source.id }
-                    .map { it to DiskUtil.buildValidFilename(it.originalTitle) }
+                    .map { it to DiskUtil.buildValidFilename(it.ogTitle) }
                     .toList()
 
                 mangaFolders.forEach mangaFolder@{ mangaFolder ->
@@ -493,8 +529,8 @@ class SettingsAdvancedController(
                         foldersCleared += 1 + (mangaFolder.listFiles().orEmpty().size)
                         mangaFolder.delete()
                     } else {
-                        val chapterList = db.getChapters(manga).executeAsBlocking()
-                        foldersCleared += downloadManager.cleanupChapters(chapterList, manga, source, removeRead, removeNonFavorite)
+                        val chapterList = getChapterByMangaId.await(manga.id)
+                        foldersCleared += downloadManager.cleanupChapters(chapterList.map { it.toDbChapter() }, manga, source, removeRead, removeNonFavorite)
                     }
                 }
             }
@@ -508,6 +544,23 @@ class SettingsAdvancedController(
                         foldersCleared,
                     )
                 activity.toast(cleanupString, Toast.LENGTH_LONG)
+            }
+        }
+    }
+
+    private fun clearPagePreviewCache() {
+        val activity = activity ?: return
+        launchIO {
+            try {
+                val deletedFiles = pagePreviewCache.clear()
+                withUIContext {
+                    activity.toast(resources?.getString(R.string.cache_deleted, deletedFiles))
+                    findPreference(CLEAR_PREVIEW_CACHE_KEY)?.summary =
+                        resources?.getString(R.string.used_cache, pagePreviewCache.readableSize)
+                }
+            } catch (e: Throwable) {
+                logcat(LogPriority.ERROR, e)
+                withUIContext { activity.toast(R.string.cache_delete_error) }
             }
         }
     }
@@ -571,3 +624,7 @@ class SettingsAdvancedController(
 }
 
 private const val CLEAR_CACHE_KEY = "pref_clear_cache_key"
+
+// SY -->
+private const val CLEAR_PREVIEW_CACHE_KEY = "pref_clear_preview_cache_key"
+// SY <--

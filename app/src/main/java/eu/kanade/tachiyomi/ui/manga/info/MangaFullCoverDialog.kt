@@ -6,24 +6,20 @@ import android.content.Intent
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import android.os.Bundle
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.core.os.bundleOf
 import coil.imageLoader
 import coil.request.ImageRequest
 import coil.size.Size
-import eu.kanade.domain.manga.interactor.GetMangaById
+import eu.kanade.domain.manga.interactor.GetManga
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.domain.manga.model.Manga
 import eu.kanade.domain.manga.model.hasCustomCover
+import eu.kanade.presentation.components.LoadingScreen
 import eu.kanade.presentation.manga.EditCoverAction
 import eu.kanade.presentation.manga.components.MangaCoverDialog
 import eu.kanade.tachiyomi.R
@@ -34,7 +30,6 @@ import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.ui.base.controller.FullComposeController
 import eu.kanade.tachiyomi.util.editCover
 import eu.kanade.tachiyomi.util.lang.launchIO
-import eu.kanade.tachiyomi.util.lang.launchUI
 import eu.kanade.tachiyomi.util.lang.withUIContext
 import eu.kanade.tachiyomi.util.system.logcat
 import eu.kanade.tachiyomi.util.system.toShareIntent
@@ -78,14 +73,7 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
                 onDismissRequest = router::popCurrentController,
             )
         } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.background),
-                contentAlignment = Alignment.Center,
-            ) {
-                CircularProgressIndicator()
-            }
+            LoadingScreen()
         }
     }
 
@@ -94,11 +82,11 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
         viewScope.launchIO {
             try {
                 val uri = presenter.saveCover(activity, temp = true) ?: return@launchIO
-                launchUI {
+                withUIContext {
                     startActivity(uri.toShareIntent(activity))
                 }
             } catch (e: Throwable) {
-                launchUI {
+                withUIContext {
                     logcat(LogPriority.ERROR, e)
                     activity.toast(R.string.error_saving_cover)
                 }
@@ -111,11 +99,11 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
         viewScope.launchIO {
             try {
                 presenter.saveCover(activity, temp = false)
-                launchUI {
+                withUIContext {
                     activity.toast(R.string.cover_saved)
                 }
             } catch (e: Throwable) {
-                launchUI {
+                withUIContext {
                     logcat(LogPriority.ERROR, e)
                     activity.toast(R.string.error_saving_cover)
                 }
@@ -126,14 +114,8 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
     private fun changeCover(action: EditCoverAction) {
         when (action) {
             EditCoverAction.EDIT -> {
-                val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
-                    type = "image/*"
-                }
                 startActivityForResult(
-                    Intent.createChooser(
-                        intent,
-                        resources?.getString(R.string.file_select_cover),
-                    ),
+                    PickVisualMedia().createIntent(activity!!, PickVisualMediaRequest(PickVisualMedia.ImageOnly)),
                     REQUEST_IMAGE_OPEN,
                 )
             }
@@ -161,7 +143,7 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
 
     inner class MangaFullCoverPresenter(
         private val mangaId: Long,
-        private val getMangaById: GetMangaById = Injekt.get(),
+        private val getManga: GetManga = Injekt.get(),
     ) : Presenter<MangaFullCoverDialog>() {
 
         private var presenterScope: CoroutineScope = MainScope()
@@ -176,7 +158,7 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
         override fun onCreate(savedState: Bundle?) {
             super.onCreate(savedState)
             presenterScope.launchIO {
-                getMangaById.subscribe(mangaId)
+                getManga.subscribe(mangaId)
                     .collect { _mangaFlow.value = it }
             }
         }
@@ -222,13 +204,12 @@ class MangaFullCoverDialog : FullComposeController<MangaFullCoverDialog.MangaFul
             presenterScope.launchIO {
                 @Suppress("BlockingMethodInNonBlockingContext")
                 context.contentResolver.openInputStream(data)?.use {
-                    val result = try {
+                    try {
                         manga.editCover(context, it, updateManga, coverCache)
+                        withUIContext { view?.onSetCoverSuccess() }
                     } catch (e: Exception) {
-                        view?.onSetCoverError(e)
-                        false
+                        withUIContext { view?.onSetCoverError(e) }
                     }
-                    withUIContext { if (result) view?.onSetCoverSuccess() }
                 }
             }
         }

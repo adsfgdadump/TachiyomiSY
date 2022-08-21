@@ -4,18 +4,25 @@ import android.content.Context
 import android.util.AttributeSet
 import android.view.View
 import com.bluelinelabs.conductor.Router
+import eu.kanade.domain.category.interactor.GetCategories
+import eu.kanade.domain.category.interactor.SetDisplayModeForCategory
+import eu.kanade.domain.category.interactor.SetSortModeForCategory
+import eu.kanade.domain.category.model.Category
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
-import eu.kanade.tachiyomi.data.database.models.Category
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
 import eu.kanade.tachiyomi.data.track.TrackManager
 import eu.kanade.tachiyomi.data.track.TrackService
 import eu.kanade.tachiyomi.ui.library.setting.DisplayModeSetting
 import eu.kanade.tachiyomi.ui.library.setting.SortDirectionSetting
 import eu.kanade.tachiyomi.ui.library.setting.SortModeSetting
+import eu.kanade.tachiyomi.util.lang.launchIO
 import eu.kanade.tachiyomi.widget.ExtendedNavigationView
 import eu.kanade.tachiyomi.widget.ExtendedNavigationView.Item.TriStateGroup.State
 import eu.kanade.tachiyomi.widget.sheet.TabbedBottomSheetDialog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 import uy.kohesive.injekt.injectLazy
@@ -23,6 +30,8 @@ import uy.kohesive.injekt.injectLazy
 class LibrarySettingsSheet(
     router: Router,
     private val trackManager: TrackManager = Injekt.get(),
+    private val setDisplayModeForCategory: SetDisplayModeForCategory = Injekt.get(),
+    private val setSortModeForCategory: SetSortModeForCategory = Injekt.get(),
     onGroupClickListener: (ExtendedNavigationView.Group) -> Unit,
 ) : TabbedBottomSheetDialog(router.activity!!) {
 
@@ -30,7 +39,8 @@ class LibrarySettingsSheet(
     private val sort: Sort
     private val display: Display
     private val grouping: Grouping
-    private val db: DatabaseHelper by injectLazy()
+
+    val sheetScope = CoroutineScope(Job() + Dispatchers.IO)
 
     init {
         filters = Filter(router.activity!!)
@@ -97,7 +107,7 @@ class LibrarySettingsSheet(
             private val unread = Item.TriStateGroup(R.string.action_filter_unread, this)
             private val started = Item.TriStateGroup(R.string.action_filter_started, this)
             private val completed = Item.TriStateGroup(R.string.completed, this)
-            private val trackFilters: Map<Int, Item.TriStateGroup>
+            private val trackFilters: Map<Long, Item.TriStateGroup>
 
             // SY -->
             private val lewd = Item.TriStateGroup(R.string.lewd, this)
@@ -206,14 +216,13 @@ class LibrarySettingsSheet(
             private val dateAdded = Item.MultiSort(R.string.action_sort_date_added, this)
 
             // SY -->
-            private val dragAndDrop = Item.MultiSort(R.string.action_sort_drag_and_drop, this)
             private val tagList = Item.MultiSort(R.string.tag_sorting, this)
             // SY <--
 
             override val header = null
 
             override val items =
-                listOf(alphabetically, lastRead, lastChecked, unread, total, latestChapter, chapterFetchDate, dateAdded /* SY --> */, dragAndDrop) + if (preferences.sortTagsForLibrary().get().isNotEmpty()) listOf(tagList) else emptyList() // SY <--
+                listOf(alphabetically, lastRead, lastChecked, unread, total, latestChapter, chapterFetchDate, dateAdded /* SY --> */) + if (preferences.sortTagsForLibrary().get().isNotEmpty()) listOf(tagList) else emptyList() // SY <--
             override val footer = null
 
             override fun initModels() {
@@ -241,8 +250,6 @@ class LibrarySettingsSheet(
                 dateAdded.state =
                     if (sorting == SortModeSetting.DATE_ADDED) order else Item.MultiSort.SORT_NONE
                 // SY -->
-                dragAndDrop.state =
-                    if (sorting == SortModeSetting.DRAG_AND_DROP) order else Item.MultiSort.SORT_NONE
                 tagList.state =
                     if (sorting == SortModeSetting.TAG_LIST) order else Item.MultiSort.SORT_NONE
                 // SY <--
@@ -250,27 +257,19 @@ class LibrarySettingsSheet(
 
             override fun onItemClicked(item: Item) {
                 item as Item.MultiStateGroup
-                // SY -->
-                if (item == dragAndDrop && preferences.groupLibraryBy().get() != LibraryGroup.BY_DEFAULT) return
-                // SY <--
                 val prevState = item.state
 
                 item.group.items.forEach {
                     (it as Item.MultiStateGroup).state =
                         Item.MultiSort.SORT_NONE
                 }
-                // SY -->
-                if (item == dragAndDrop) {
-                    item.state = Item.MultiSort.SORT_ASC
-                } else {
-                    item.state = when (prevState) {
-                        Item.MultiSort.SORT_NONE -> Item.MultiSort.SORT_ASC
-                        Item.MultiSort.SORT_ASC -> Item.MultiSort.SORT_DESC
-                        Item.MultiSort.SORT_DESC -> Item.MultiSort.SORT_ASC
-                        else -> throw Exception("Unknown state")
-                    }
+
+                item.state = when (prevState) {
+                    Item.MultiSort.SORT_NONE -> Item.MultiSort.SORT_ASC
+                    Item.MultiSort.SORT_ASC -> Item.MultiSort.SORT_DESC
+                    Item.MultiSort.SORT_DESC -> Item.MultiSort.SORT_ASC
+                    else -> throw Exception("Unknown state")
                 }
-                // SY <--
 
                 item.state = when (prevState) {
                     Item.MultiSort.SORT_NONE -> Item.MultiSort.SORT_ASC
@@ -281,24 +280,20 @@ class LibrarySettingsSheet(
 
                 setSortModePreference(item)
 
-                setSortDirectionPrefernece(item)
+                setSortDirectionPreference(item)
 
                 item.group.items.forEach { adapter.notifyItemChanged(it) }
             }
 
-            private fun setSortDirectionPrefernece(item: Item.MultiStateGroup) {
+            private fun setSortDirectionPreference(item: Item.MultiStateGroup) {
                 val flag = if (item.state == Item.MultiSort.SORT_ASC) {
                     SortDirectionSetting.ASCENDING
                 } else {
                     SortDirectionSetting.DESCENDING
                 }
 
-                if (preferences.categorizedDisplaySettings().get() && currentCategory != null && currentCategory?.id != 0 /* SY --> */ && preferences.groupLibraryBy().get() == LibraryGroup.BY_DEFAULT /* SY <-- */) {
-                    currentCategory?.sortDirection = flag.flag
-
-                    db.insertCategory(currentCategory!!).executeAsBlocking()
-                } else {
-                    preferences.librarySortingAscending().set(flag)
+                sheetScope.launchIO {
+                    setSortModeForCategory.await(currentCategory!!, flag)
                 }
             }
 
@@ -313,18 +308,13 @@ class LibrarySettingsSheet(
                     chapterFetchDate -> SortModeSetting.CHAPTER_FETCH_DATE
                     dateAdded -> SortModeSetting.DATE_ADDED
                     // SY -->
-                    dragAndDrop -> SortModeSetting.DRAG_AND_DROP
                     tagList -> SortModeSetting.TAG_LIST
                     // SY <--
                     else -> throw NotImplementedError("Unknown display mode")
                 }
 
-                if (preferences.categorizedDisplaySettings().get() && currentCategory != null && currentCategory?.id != 0 /* SY --> */ && preferences.groupLibraryBy().get() == LibraryGroup.BY_DEFAULT /* SY <-- */) {
-                    currentCategory?.sortMode = flag.flag
-
-                    db.insertCategory(currentCategory!!).executeAsBlocking()
-                } else {
-                    preferences.librarySortingMode().set(flag)
+                sheetScope.launchIO {
+                    setSortModeForCategory.await(currentCategory!!, flag)
                 }
             }
         }
@@ -364,8 +354,8 @@ class LibrarySettingsSheet(
 
         // Gets user preference of currently selected display mode at current category
         private fun getDisplayModePreference(): DisplayModeSetting {
-            return if (preferences.categorizedDisplaySettings().get() && currentCategory != null && currentCategory?.id != 0 /* SY --> */ && preferences.groupLibraryBy().get() == LibraryGroup.BY_DEFAULT /* SY <-- */) {
-                DisplayModeSetting.fromFlag(currentCategory?.displayMode)
+            return if (currentCategory != null && preferences.categorizedDisplaySettings().get()/* SY --> */ && preferences.groupLibraryBy().get() == LibraryGroup.BY_DEFAULT /* SY <-- */) {
+                DisplayModeSetting.fromFlag(currentCategory!!.displayMode)
             } else {
                 preferences.libraryDisplayMode().get()
             }
@@ -416,12 +406,8 @@ class LibrarySettingsSheet(
                     else -> throw NotImplementedError("Unknown display mode")
                 }
 
-                if (preferences.categorizedDisplaySettings().get() && currentCategory != null && currentCategory?.id != 0 /* SY --> */ && preferences.groupLibraryBy().get() == LibraryGroup.BY_DEFAULT /* SY <-- */) {
-                    currentCategory?.displayMode = flag.flag
-
-                    db.insertCategory(currentCategory!!).executeAsBlocking()
-                } else {
-                    preferences.libraryDisplayMode().set(flag)
+                sheetScope.launchIO {
+                    setDisplayModeForCategory.await(currentCategory!!, flag)
                 }
             }
         }
@@ -474,6 +460,7 @@ class LibrarySettingsSheet(
                 item.checked = !item.checked
                 when (item) {
                     startReadingButton -> preferences.startReadingButton().set((item.checked))
+                    else -> Unit
                 }
                 adapter.notifyItemChanged(item)
             }
@@ -517,7 +504,9 @@ class LibrarySettingsSheet(
         inner class InternalGroup : Group {
             private val groupItems = mutableListOf<Item.DrawableSelection>()
             private val trackManager: TrackManager = Injekt.get()
-            private val hasCategories = Injekt.get<DatabaseHelper>().getCategories().executeAsBlocking().size != 0
+            private val hasCategories = runBlocking {
+                Injekt.get<GetCategories>().await().filterNot(Category::isSystemCategory).isNotEmpty()
+            }
 
             init {
                 val groupingItems = mutableListOf(
@@ -559,12 +548,6 @@ class LibrarySettingsSheet(
 
             override fun onItemClicked(item: Item) {
                 item as Item.DrawableSelection
-                if (item.id != LibraryGroup.BY_DEFAULT && preferences.librarySortingMode().get() == SortModeSetting.DRAG_AND_DROP) {
-                    preferences.librarySortingMode().set(SortModeSetting.ALPHABETICAL)
-                    preferences.librarySortingAscending().set(SortDirectionSetting.ASCENDING)
-                    sort.adjustDisplaySelection()
-                }
-
                 item.group.items.forEach {
                     (it as Item.DrawableSelection).state =
                         Item.DrawableSelection.NOT_SELECTED

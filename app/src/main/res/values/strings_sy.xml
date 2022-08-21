@@ -314,6 +314,15 @@
     <string name="automatic_can_still_switch">While using automatic page layout, you can still switch between layouts while reading without overriding this setting</string>
     <string name="invert_double_pages">Invert double pages</string>
 
+    <!-- Center margin -->
+    <string name="center_margin">Center Margin</string>
+    <string name="center_margin_none">None</string>
+    <string name="center_margin_double_page">Add to double Page</string>
+    <string name="center_margin_wide_page">Add to wide Page</string>
+    <string name="center_margin_double_and_wide_page">Add to both</string>
+    <string name="pref_center_margin">Center margin type</string>
+    <string name="pref_center_margin_summary">Insert spacer to accommodate deadspace on foldable devices.</string>
+
     <!-- Manga Page -->
     <!-- Manga Info -->
     <string name="az_recommends">See Recommendations</string>
@@ -381,6 +390,8 @@
     <string name="information_empty_tags">You have no tags. Tap the plus button to create one for sorting your library by tags</string>
     <string name="error_tag_exists">This tag exists!</string>
     <string name="snack_tags_deleted">Tags deleted</string>
+    <string name="delete_tag">Delete tag</string>
+    <string name="delete_tag_confirmation">Do you wish to delete the tag %s</string>
 
     <!-- Extension section -->
     <string name="ext_redundant">Redundant</string>
@@ -399,6 +410,8 @@
     <string name="snack_repo_deleted">Repo deleted</string>
     <string name="invalid_repo_name">Invalid repo name</string>
     <string name="repo_source">Repo source</string>
+    <string name="delete_repo">Delete repo</string>
+    <string name="delete_repo_confirmation">Do you wish to delete the repo %s</string>
 
     <!-- Migration -->
     <string name="select_sources">Select sources</string>
@@ -491,6 +504,7 @@
     <string name="favorites_sync_notes_message"><![CDATA[1. Changes to category names in the app are <b>NOT</b> synced! Please <i>change the category names on ExHentai instead</i>. The category names will be copied from the ExHentai servers every sync.<br><br>2. The favorite categories on ExHentai correspond to the <b>first 10 categories in the app</b> (excluding the \'Default\' category). <i>Galleries in other categories will <b>NOT</b> be synced!</i><br><br>3. <font color=\'red\'><b>ENSURE YOU HAVE A STABLE INTERNET CONNECTION WHEN SYNC IS IN PROGRESS!</b></font> If the internet disconnects while the app is syncing, your favorites may be left in a <i>partially-synced state</i>.<br><br>4. Keep the app open while favorites are syncing. Android will close apps that are in the background sometimes and that could be bad if it happens while the app is syncing.<br><br>5. <b>Do NOT put favorites in multiple categories</b> (the app supports this). This can confuse the sync algorithm as ExHentai only allows each favorite to be in one category.<br><br>This dialog will only popup once. You can read these notes again by going to \'Settings > E-Hentai > Show favorites sync notes\'.]]></string>
     <string name="favorites_sync_reset">Are you sure?</string>
     <string name="favorites_sync_reset_message">Resetting the sync state can cause your next sync to be extremely slow.</string>
+    <string name="favorites_sync_conformation_message">Are you sure you wish to sync your favorites with E-Hentai?</string>
 
     <!-- Gallery Adder -->
     <!-- Batch Add -->
@@ -525,6 +539,12 @@
     <string name="could_not_open_manga">Could not open this manga:\n\n%1$s</string>
     <string name="manga_id_is_null">Manga ID is null!</string>
     <string name="loading_manga">Loading manga…</string>
+
+    <!-- Page previews -->
+    <string name="page_previews">Page previews</string>
+    <string name="more_previews">More previews</string>
+    <string name="pref_clear_page_preview_cache">Clear page preview cache</string>
+    <string name="page_preview_page_go_to">Go to</string>
 
     <!-- Rating 0-10 (0, 0.5, 1, 1.5 and so fourth) -->
     <string name="rating10">Masterpiece</string>

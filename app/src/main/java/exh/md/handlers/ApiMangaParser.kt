@@ -1,6 +1,8 @@
 package exh.md.handlers
 
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
+import eu.kanade.domain.manga.interactor.GetFlatMetadataById
+import eu.kanade.domain.manga.interactor.GetManga
+import eu.kanade.domain.manga.interactor.InsertFlatMetadata
 import eu.kanade.tachiyomi.source.model.SManga
 import exh.log.xLogE
 import exh.md.dto.ChapterDataDto
@@ -12,8 +14,6 @@ import exh.md.utils.MdUtil
 import exh.md.utils.asMdMap
 import exh.metadata.metadata.MangaDexSearchMetadata
 import exh.metadata.metadata.base.RaisedTag
-import exh.metadata.metadata.base.getFlatMetadataForManga
-import exh.metadata.metadata.base.insertFlatMetadata
 import exh.util.capitalize
 import exh.util.floor
 import exh.util.nullIfEmpty
@@ -25,7 +25,9 @@ import java.util.Locale
 class ApiMangaParser(
     private val lang: String,
 ) {
-    val db: DatabaseHelper by injectLazy()
+    private val getManga: GetManga by injectLazy()
+    private val insertFlatMetadata: InsertFlatMetadata by injectLazy()
+    private val getFlatMetadataById: GetFlatMetadataById by injectLazy()
 
     val metaClass = MangaDexSearchMetadata::class
 
@@ -37,23 +39,23 @@ class ApiMangaParser(
     }?.call()
         ?: error("Could not find no-args constructor for meta class: ${metaClass.qualifiedName}!")
 
-    fun parseToManga(
+    suspend fun parseToManga(
         manga: MangaInfo,
         sourceId: Long,
         input: MangaDto,
         simpleChapters: List<String>,
         statistics: StatisticsMangaDto?,
     ): MangaInfo {
-        val mangaId = db.getManga(manga.key, sourceId).executeAsBlocking()?.id
+        val mangaId = getManga.await(manga.key, sourceId)?.id
         val metadata = if (mangaId != null) {
-            val flatMetadata = db.getFlatMetadataForManga(mangaId).executeAsBlocking()
+            val flatMetadata = getFlatMetadataById.await(mangaId)
             flatMetadata?.raise(metaClass) ?: newMetaInstance()
         } else newMetaInstance()
 
         parseIntoMetadata(metadata, input, simpleChapters, statistics)
         if (mangaId != null) {
             metadata.mangaId = mangaId
-            db.insertFlatMetadata(metadata.flatten())
+            insertFlatMetadata.await(metadata.flatten())
         }
 
         return metadata.createMangaInfo(manga)

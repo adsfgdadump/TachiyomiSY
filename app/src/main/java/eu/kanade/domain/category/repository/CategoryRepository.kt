@@ -6,19 +6,23 @@ import kotlinx.coroutines.flow.Flow
 
 interface CategoryRepository {
 
-    fun getAll(): Flow<List<Category>>
+    suspend fun getAll(): List<Category>
 
-    @Throws(DuplicateNameException::class)
-    suspend fun insert(name: String, order: Long)
+    fun getAllAsFlow(): Flow<List<Category>>
 
-    @Throws(DuplicateNameException::class)
-    suspend fun update(payload: CategoryUpdate)
+    suspend fun getCategoriesByMangaId(mangaId: Long): List<Category>
+
+    fun getCategoriesByMangaIdAsFlow(mangaId: Long): Flow<List<Category>>
+
+    // SY -->
+    suspend fun insert(category: Category): Long
+    // SY <--
+
+    suspend fun updatePartial(update: CategoryUpdate)
+
+    suspend fun updatePartial(updates: List<CategoryUpdate>)
+
+    suspend fun updateAllFlags(flags: Long?)
 
     suspend fun delete(categoryId: Long)
-
-    suspend fun getCategoriesForManga(mangaId: Long): List<Category>
-
-    suspend fun checkDuplicateName(name: String): Boolean
 }
-
-class DuplicateNameException(name: String) : Exception("There's a category which is named \"$name\" already")

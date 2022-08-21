@@ -5,9 +5,9 @@ import android.view.MenuInflater
 import android.view.MenuItem
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import eu.kanade.domain.manga.interactor.GetFavorites
 import eu.kanade.presentation.browse.MigrateSourceScreen
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
 import eu.kanade.tachiyomi.ui.base.controller.ComposeController
 import eu.kanade.tachiyomi.ui.base.controller.pushController
@@ -16,7 +16,6 @@ import eu.kanade.tachiyomi.ui.browse.migration.advanced.design.PreMigrationContr
 import eu.kanade.tachiyomi.ui.browse.migration.manga.MigrationMangaController
 import eu.kanade.tachiyomi.util.lang.launchIO
 import eu.kanade.tachiyomi.util.lang.withUIContext
-import eu.kanade.tachiyomi.util.system.copyToClipboard
 import eu.kanade.tachiyomi.util.system.openInBrowser
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
@@ -47,17 +46,12 @@ class MigrationSourcesController : ComposeController<MigrationSourcesPresenter>(
                     ),
                 )
             },
-            onLongClickItem = { source ->
-                val sourceId = source.id.toString()
-                activity?.copyToClipboard(sourceId, sourceId)
-            },
             onClickAll = { source ->
                 // TODO: Jay wtf, need to clean this up sometime
                 launchIO {
-                    val manga = Injekt.get<DatabaseHelper>().getFavoriteMangas().executeAsBlocking()
+                    val manga = Injekt.get<GetFavorites>().await()
                     val sourceMangas =
-                        manga.asSequence().filter { it.source == source.id }.mapNotNull { it.id }
-                            .toList()
+                        manga.asSequence().filter { it.source == source.id }.map { it.id }.toList()
                     withUIContext {
                         PreMigrationController.navigateToMigration(
                             Injekt.get<PreferencesHelper>().skipPreMigration().get(),

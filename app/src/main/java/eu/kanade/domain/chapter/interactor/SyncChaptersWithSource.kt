@@ -7,7 +7,6 @@ import eu.kanade.domain.chapter.model.toDbChapter
 import eu.kanade.domain.chapter.repository.ChapterRepository
 import eu.kanade.domain.manga.interactor.UpdateManga
 import eu.kanade.domain.manga.model.Manga
-import eu.kanade.domain.manga.model.toDbManga
 import eu.kanade.tachiyomi.data.download.DownloadManager
 import eu.kanade.tachiyomi.source.LocalSource
 import eu.kanade.tachiyomi.source.Source
@@ -30,11 +29,19 @@ class SyncChaptersWithSource(
     private val getChapterByMangaId: GetChapterByMangaId = Injekt.get(),
 ) {
 
+    /**
+     * Method to synchronize db chapters with source ones
+     *
+     * @param rawSourceChapters the chapters from the source.
+     * @param manga the manga the chapters belong to.
+     * @param source the source the manga belongs to.
+     * @return Newly added chapters
+     */
     suspend fun await(
         rawSourceChapters: List<SChapter>,
         manga: Manga,
         source: Source,
-    ): Pair<List<Chapter>, List<Chapter>> {
+    ): List<Chapter> {
         if (rawSourceChapters.isEmpty() && source.id != LocalSource.ID) {
             throw NoChaptersException()
         }
@@ -97,8 +104,8 @@ class SyncChaptersWithSource(
                 toAdd.add(toAddChapter)
             } else {
                 if (shouldUpdateDbChapter.await(dbChapter, chapter)) {
-                    if (dbChapter.name != chapter.name && downloadManager.isChapterDownloaded(dbChapter.toDbChapter(), manga.toDbManga())) {
-                        downloadManager.renameChapter(source, manga.toDbManga(), dbChapter.toDbChapter(), chapter.toDbChapter())
+                    if (dbChapter.name != chapter.name && downloadManager.isChapterDownloaded(dbChapter.name, dbChapter.scanlator, /* SY --> */ manga.ogTitle /* SY <-- */, manga.source)) {
+                        downloadManager.renameChapter(source, manga, dbChapter.toDbChapter(), chapter.toDbChapter())
                     }
                     var toChangeChapter = dbChapter.copy(
                         name = chapter.name,
@@ -116,7 +123,7 @@ class SyncChaptersWithSource(
 
         // Return if there's nothing to add, delete or change, avoiding unnecessary db transactions.
         if (toAdd.isEmpty() && toDelete.isEmpty() && toChange.isEmpty()) {
-            return Pair(emptyList(), emptyList())
+            return emptyList()
         }
 
         val reAdded = mutableListOf<Chapter>()
@@ -141,7 +148,7 @@ class SyncChaptersWithSource(
         var updatedToAdd = toAdd.map { toAddItem ->
             var chapter = toAddItem.copy(dateFetch = rightNow + itemCount--)
 
-            if (chapter.isRecognizedNumber.not() && chapter.chapterNumber !in deletedChapterNumbers) return@map chapter
+            if (chapter.isRecognizedNumber.not() || chapter.chapterNumber !in deletedChapterNumbers) return@map chapter
 
             if (chapter.chapterNumber in deletedReadChapterNumbers) {
                 chapter = chapter.copy(read = true)
@@ -192,7 +199,8 @@ class SyncChaptersWithSource(
         // Note that last_update actually represents last time the chapter list changed at all
         updateManga.awaitUpdateLastUpdate(manga.id)
 
-        @Suppress("ConvertArgumentToSet") // See tachiyomiorg/tachiyomi#6372.
-        return Pair(updatedToAdd.subtract(reAdded).toList(), toDelete.subtract(reAdded).toList())
+        val reAddedUrls = reAdded.map { it.url }.toHashSet()
+
+        return updatedToAdd.filterNot { it.url in reAddedUrls }
     }
 }

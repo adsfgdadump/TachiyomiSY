@@ -8,30 +8,26 @@ import android.view.ViewGroup
 import androidx.activity.OnBackPressedDispatcherOwner
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
 import androidx.core.os.bundleOf
 import com.bluelinelabs.conductor.ControllerChangeHandler
 import com.bluelinelabs.conductor.ControllerChangeType
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import eu.kanade.data.chapter.NoChaptersException
+import eu.kanade.domain.category.model.Category
+import eu.kanade.domain.manga.model.Manga
 import eu.kanade.domain.manga.model.toDbManga
-import eu.kanade.presentation.manga.ChapterDownloadAction
+import eu.kanade.presentation.components.ChapterDownloadAction
+import eu.kanade.presentation.components.LoadingScreen
 import eu.kanade.presentation.manga.DownloadAction
 import eu.kanade.presentation.manga.MangaScreen
 import eu.kanade.presentation.util.calculateWindowWidthSizeClass
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.models.Category
-import eu.kanade.tachiyomi.data.database.models.Manga
 import eu.kanade.tachiyomi.data.download.DownloadService
 import eu.kanade.tachiyomi.data.download.model.Download
 import eu.kanade.tachiyomi.data.preference.PreferencesHelper
@@ -66,12 +62,16 @@ import eu.kanade.tachiyomi.ui.reader.ReaderActivity
 import eu.kanade.tachiyomi.ui.recent.history.HistoryController
 import eu.kanade.tachiyomi.ui.recent.updates.UpdatesController
 import eu.kanade.tachiyomi.ui.webview.WebViewActivity
+import eu.kanade.tachiyomi.util.lang.launchIO
 import eu.kanade.tachiyomi.util.lang.launchUI
+import eu.kanade.tachiyomi.util.lang.withUIContext
+import eu.kanade.tachiyomi.util.system.getParcelableCompat
 import eu.kanade.tachiyomi.util.system.logcat
 import eu.kanade.tachiyomi.util.system.toast
 import eu.kanade.tachiyomi.widget.materialdialogs.QuadStateTextView
 import eu.kanade.tachiyomi.widget.materialdialogs.await
 import exh.md.similar.MangaDexSimilarController
+import exh.pagepreview.PagePreviewController
 import exh.recs.RecommendsController
 import exh.source.MERGED_SOURCE_ID
 import exh.source.getMainSource
@@ -81,6 +81,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
 import uy.kohesive.injekt.Injekt
@@ -122,7 +123,7 @@ class MangaController :
         get() = presenter.isFromSource
 
     // SY -->
-    val smartSearchConfig: SourcesController.SmartSearchConfig? = args.getParcelable(
+    val smartSearchConfig = args.getParcelableCompat<SourcesController.SmartSearchConfig>(
         SMART_SEARCH_CONFIG_EXTRA,
     )
     // SY <--
@@ -189,23 +190,30 @@ class MangaController :
                 onMergedSettingsClicked = this::openMergedSettingsDialog,
                 onMergeClicked = this::openSmartSearch,
                 onMergeWithAnotherClicked = this::mergeWithAnother,
+                onMorePreviewsClicked = this::openMorePagePreviews,
                 // SY <--
                 onMultiBookmarkClicked = presenter::bookmarkChapters,
                 onMultiMarkAsReadClicked = presenter::markChaptersRead,
                 onMarkPreviousAsReadClicked = presenter::markPreviousChapterRead,
                 onMultiDeleteClicked = this::deleteChaptersWithConfirmation,
+                onChapterSelected = presenter::toggleSelection,
+                onAllChapterSelected = presenter::toggleAllSelection,
+                onInvertSelection = presenter::invertSelection,
             )
         } else {
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
+            LoadingScreen()
         }
     }
 
     // Let compose view handle this
     override fun handleBack(): Boolean {
-        (activity as? OnBackPressedDispatcherOwner)?.onBackPressedDispatcher?.onBackPressed()
-        return true
+        val dispatcher = (activity as? OnBackPressedDispatcherOwner)?.onBackPressedDispatcher ?: return false
+        return if (dispatcher.hasEnabledCallbacks()) {
+            dispatcher.onBackPressed()
+            true
+        } else {
+            false
+        }
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup, savedViewState: Bundle?): View {
@@ -235,7 +243,7 @@ class MangaController :
     private fun openMergedSettingsDialog() {
         EditMergedSettingsDialog(
             this,
-            presenter.manga!!.toDbManga(),
+            presenter.manga ?: return,
         ).showDialog(router)
     }
 
@@ -301,13 +309,13 @@ class MangaController :
                 {
                     AddDuplicateMangaDialog(
                         target = this,
-                        libraryManga = it.toDbManga(),
+                        libraryManga = it,
                         onAddToLibrary = { onFavoriteClick(checkDuplicate = false) },
                     ).showDialog(router)
                 }
             } else null,
             onRequireCategory = { manga, categories ->
-                val ids = presenter.getMangaCategoryIds(manga)
+                val ids = runBlocking { presenter.getMangaCategoryIds(manga) }
                 val preselected = categories.map {
                     if (it.id in ids) {
                         QuadStateTextView.State.CHECKED.ordinal
@@ -315,7 +323,7 @@ class MangaController :
                         QuadStateTextView.State.UNCHECKED.ordinal
                     }
                 }.toTypedArray()
-                showChangeCategoryDialog(manga.toDbManga(), categories, preselected)
+                showChangeCategoryDialog(manga, categories, preselected)
             },
         )
     }
@@ -336,12 +344,19 @@ class MangaController :
         }
     }
 
+    // SY -->
+    private fun openMorePagePreviews() {
+        val manga = presenter.manga ?: return
+        router.pushController(PagePreviewController(manga.id))
+    }
+    // SY <--
+
     // EXH -->
-    fun openSmartSearch() {
+    private fun openSmartSearch() {
         val manga = presenter.manga ?: return
         val smartSearchConfig = SourcesController.SmartSearchConfig(manga.title, manga.id)
 
-        router?.pushController(
+        router.pushController(
             SourcesController(
                 bundleOf(
                     SourcesController.SMART_SEARCH_CONFIG to smartSearchConfig,
@@ -361,7 +376,7 @@ class MangaController :
                 router?.popCurrentController()
                 router?.replaceTopController(
                     MangaController(
-                        mergedManga.id!!,
+                        mergedManga.id,
                         true,
                         update = true,
                     ).withFadeTransaction(),
@@ -403,23 +418,24 @@ class MangaController :
     }
     // AZ <--
 
-    fun onTrackingClick() {
-        trackSheet.show()
-    }
-
     private fun onCategoriesClick() {
-        val manga = presenter.manga ?: return
-        val categories = presenter.getCategories()
+        viewScope.launchIO {
+            val manga = presenter.manga ?: return@launchIO
+            val categories = presenter.getCategories()
 
-        val ids = presenter.getMangaCategoryIds(manga)
-        val preselected = categories.map {
-            if (it.id in ids) {
-                QuadStateTextView.State.CHECKED.ordinal
-            } else {
-                QuadStateTextView.State.UNCHECKED.ordinal
+            val ids = presenter.getMangaCategoryIds(manga)
+            val preselected = categories.map {
+                if (it.id in ids) {
+                    QuadStateTextView.State.CHECKED.ordinal
+                } else {
+                    QuadStateTextView.State.UNCHECKED.ordinal
+                }
+            }.toTypedArray()
+
+            withUIContext {
+                showChangeCategoryDialog(manga, categories, preselected)
             }
-        }.toTypedArray()
-        showChangeCategoryDialog(manga.toDbManga(), categories, preselected)
+        }
     }
 
     private fun showChangeCategoryDialog(manga: Manga, categories: List<Category>, preselected: Array<Int>) {

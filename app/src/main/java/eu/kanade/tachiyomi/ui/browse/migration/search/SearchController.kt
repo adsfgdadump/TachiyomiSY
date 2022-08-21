@@ -5,9 +5,9 @@ import android.view.Menu
 import android.view.MenuInflater
 import androidx.appcompat.widget.SearchView
 import androidx.core.os.bundleOf
+import eu.kanade.domain.manga.interactor.GetManga
+import eu.kanade.domain.manga.model.Manga
 import eu.kanade.tachiyomi.R
-import eu.kanade.tachiyomi.data.database.DatabaseHelper
-import eu.kanade.tachiyomi.data.database.models.Manga
 import eu.kanade.tachiyomi.source.CatalogueSource
 import eu.kanade.tachiyomi.source.SourceManager
 import eu.kanade.tachiyomi.ui.base.controller.pushController
@@ -17,6 +17,7 @@ import eu.kanade.tachiyomi.ui.browse.source.globalsearch.GlobalSearchPresenter
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.runBlocking
 import reactivecircus.flowbinding.appcompat.QueryTextEvent
 import reactivecircus.flowbinding.appcompat.queryTextEvents
 import uy.kohesive.injekt.Injekt
@@ -26,7 +27,7 @@ class SearchController(
     private var manga: Manga? = null,
     private var sources: List<CatalogueSource>? = null,
 ) : GlobalSearchController(
-    manga?.originalTitle,
+    manga?.ogTitle,
     bundle = bundleOf(
         OLD_MANGA to manga?.id,
         SOURCES to sources?.map { it.id }?.toLongArray(),
@@ -34,7 +35,10 @@ class SearchController(
 ) {
     constructor(targetController: MigrationListController?, mangaId: Long, sources: LongArray) :
         this(
-            Injekt.get<DatabaseHelper>().getManga(mangaId).executeAsBlocking(),
+            runBlocking {
+                Injekt.get<GetManga>()
+                    .await(mangaId)
+            },
             sources.map { Injekt.get<SourceManager>().getOrStub(it) }.filterIsInstance<CatalogueSource>(),
         ) {
         this.targetController = targetController

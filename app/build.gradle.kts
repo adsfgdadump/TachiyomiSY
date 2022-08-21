@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.testing.logging.TestLogEvent
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
@@ -19,6 +20,7 @@ if (gradle.startParameter.taskRequests.toString().contains("Standard")) {
 shortcutHelper.setFilePath("./shortcuts.xml")
 
 android {
+    namespace = "eu.kanade.tachiyomi"
     compileSdk = AndroidConfig.compileSdk
     ndkVersion = AndroidConfig.ndk
 
@@ -26,8 +28,8 @@ android {
         applicationId = "eu.kanade.tachiyomi.sy"
         minSdk = AndroidConfig.minSdk
         targetSdk = AndroidConfig.targetSdk
-        versionCode = 35
-        versionName = "1.8.3"
+        versionCode = 38
+        versionName = "1.8.5"
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")
@@ -108,7 +110,7 @@ android {
     }
 
     composeOptions {
-        kotlinCompilerExtensionVersion = compose.versions.compose.get()
+        kotlinCompilerExtensionVersion = compose.versions.compiler.get()
     }
 
     compileOptions {
@@ -143,10 +145,13 @@ dependencies {
     implementation(compose.accompanist.webview)
     implementation(compose.accompanist.swiperefresh)
     implementation(compose.accompanist.flowlayout)
+    implementation(compose.accompanist.pager.core)
+    implementation(compose.accompanist.pager.indicators)
 
     implementation(androidx.paging.runtime)
     implementation(androidx.paging.compose)
 
+    implementation(libs.bundles.sqlite)
     implementation(androidx.sqlite)
     implementation(libs.sqldelight.android.driver)
     implementation(libs.sqldelight.coroutines)
@@ -167,8 +172,8 @@ dependencies {
     implementation(androidx.corektx)
     implementation(androidx.splashscreen)
     implementation(androidx.recyclerview)
-    implementation(androidx.swiperefreshlayout)
     implementation(androidx.viewpager)
+    implementation(androidx.glance)
 
     implementation(androidx.bundles.lifecycle)
 
@@ -200,11 +205,6 @@ dependencies {
     implementation(libs.unifile)
     implementation(libs.junrar)
 
-    // Database
-    implementation(libs.bundles.sqlite)
-    implementation("com.github.inorichi.storio:storio-common:8be19de@aar")
-    implementation("com.github.inorichi.storio:storio-sqlite:8be19de@aar")
-
     // Preferences
     implementation(libs.preferencektx)
     implementation(libs.flowpreferences)
@@ -231,7 +231,6 @@ dependencies {
     implementation(libs.androidprocessbutton)
     implementation(libs.flexible.adapter.core)
     implementation(libs.flexible.adapter.ui)
-    implementation(libs.viewstatepageradapter)
     implementation(libs.photoview)
     implementation(libs.directionalviewpager) {
         exclude(group = "androidx.viewpager", module = "viewpager")
@@ -288,41 +287,41 @@ dependencies {
 }
 
 tasks {
+    val localesConfigTask = registerLocalesConfigTask(project)
+
     withType<Test> {
         useJUnitPlatform()
         testLogging {
-            events("passed", "skipped", "failed")
+            events(TestLogEvent.PASSED, TestLogEvent.SKIPPED, TestLogEvent.FAILED)
         }
     }
 
     // See https://kotlinlang.org/docs/reference/experimental.html#experimental-status-of-experimental-api(-markers)
     withType<KotlinCompile> {
         kotlinOptions.freeCompilerArgs += listOf(
-            "-opt-in=kotlin.Experimental",
-            "-opt-in=kotlin.RequiresOptIn",
-            "-opt-in=kotlin.ExperimentalStdlibApi",
-            "-opt-in=kotlinx.coroutines.FlowPreview",
-            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
-            "-opt-in=kotlinx.coroutines.InternalCoroutinesApi",
-            "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
             "-opt-in=coil.annotation.ExperimentalCoilApi",
+            "-opt-in=com.google.accompanist.pager.ExperimentalPagerApi",
             "-opt-in=androidx.compose.material3.ExperimentalMaterial3Api",
             "-opt-in=androidx.compose.ui.ExperimentalComposeUiApi",
             "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi",
             "-opt-in=androidx.compose.animation.graphics.ExperimentalAnimationGraphicsApi",
             "-opt-in=androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi",
+            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+            "-opt-in=kotlinx.coroutines.FlowPreview",
+            "-opt-in=kotlinx.coroutines.InternalCoroutinesApi",
+            "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
         )
     }
 
     // Duplicating Hebrew string assets due to some locale code issues on different devices
-    val copyHebrewStrings = task("copyHebrewStrings", type = Copy::class) {
+    val copyHebrewStrings by registering(Copy::class) {
         from("./src/main/res/values-he")
         into("./src/main/res/values-iw")
         include("**/*")
     }
 
     preBuild {
-        dependsOn(formatKotlin, copyHebrewStrings)
+        dependsOn(formatKotlin, copyHebrewStrings, localesConfigTask)
     }
 }
 
